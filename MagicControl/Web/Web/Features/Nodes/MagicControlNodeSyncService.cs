@@ -56,7 +56,7 @@ public sealed class MagicControlNodeSyncService(
 
         var credential = await db.InstanceCredentials
             .Include(candidate => candidate.ManagedInstance)
-            .ThenInclude(candidate => candidate!.Group)
+            .ThenInclude(instance => instance!.Group)
             .SingleOrDefaultAsync(
                 candidate => candidate.NodeId == request.Settings.Identity.NodeId
                              && candidate.CredentialId == request.Settings.Identity.CredentialId,
@@ -79,15 +79,20 @@ public sealed class MagicControlNodeSyncService(
                 CredentialId = request.Settings.Identity.CredentialId,
                 PublicKey = request.Settings.Identity.PublicKey,
                 Fingerprint = Fingerprint(request.Settings.Identity.PublicKey),
-                SignatureAlgorithm = request.Settings.Identity.Algorithm,
+                SignatureAlgorithm = request.Settings.Identity.SignatureAlgorithm,
                 Status = MagicCredentialStatus.Pending,
                 CreatedUtc = DateTimeOffset.UtcNow,
                 UpdatedUtc = DateTimeOffset.UtcNow
             };
             db.InstanceCredentials.Add(credential);
-            await UpsertPendingRequestAsync(db, group, request, credential, cancellationToken);
+            var enrollment = await UpsertPendingRequestAsync(
+                db,
+                group,
+                request,
+                credential,
+                cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
-            return Pending(request, PairingCode(request, credential.Fingerprint));
+            return Pending(request, enrollment.PairingCode);
         }
 
         if (!string.Equals(
@@ -127,9 +132,9 @@ public sealed class MagicControlNodeSyncService(
             };
         }
 
-        if (credential.Status is MagicCredentialStatus.Revoked or MagicCredentialStatus.Disabled)
+        if (credential.Status == MagicCredentialStatus.Revoked)
         {
-            return Rejected(request, null, "The MagicControl node credential is disabled or revoked.");
+            return Rejected(request, null, "The MagicControl node credential is revoked.");
         }
 
         var verificationResult = await proofVerifier.VerifyAsync(
@@ -196,9 +201,9 @@ public sealed class MagicControlNodeSyncService(
             manifest,
             request.BootstrapNonce,
             [],
-            null,
-            "MagicControl approval and settings are active.",
-            TimeSpan.FromSeconds(30));
+            PairingCode: null,
+            Message: "MagicControl approval and settings are active.",
+            SuggestedPollInterval: TimeSpan.FromSeconds(30));
     }
 
     public async ValueTask<MagicSecretResponse> ResolveSecretAsync(
@@ -276,7 +281,7 @@ public sealed class MagicControlNodeSyncService(
                 CredentialId = request.Settings.Identity.CredentialId,
                 PublicKey = request.Settings.Identity.PublicKey,
                 Fingerprint = credential.Fingerprint,
-                SignatureAlgorithm = request.Settings.Identity.Algorithm,
+                SignatureAlgorithm = request.Settings.Identity.SignatureAlgorithm,
                 DisplayName = request.DisplayName.Trim(),
                 ApplicationName = request.ApplicationName.Trim(),
                 GroupId = group.Id,
@@ -410,6 +415,7 @@ public sealed class MagicControlNodeSyncService(
         {
             return null;
         }
+
         var trimmed = value.Trim();
         return trimmed.Length <= maximumLength
             ? trimmed
