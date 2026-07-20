@@ -51,6 +51,7 @@ if (magic.ShouldExit)
 - Local environment variables and custom providers continue working.
 - Applications advertise and discover one another directly on the LAN when endpoints are configured.
 - The client also performs opportunistic Mesh discovery without making platform availability a startup requirement.
+- Before the client has accepted a signed Secured policy, protected MagicControl endpoints behave as open application endpoints.
 - When no approved cached state and no Mesh are available, the application reports local-only status and continues normally.
 
 Use `RequireApprovedState` only for applications that must refuse startup without previously approved MagicControl state.
@@ -86,7 +87,7 @@ Each application periodically advertises:
 
 A receiver verifies the public-key fingerprint, body hash, proof audience, method, target, lifetime, identity binding, and ECDSA signature before accepting the peer. Accepted observations are kept in memory and in a separate encrypted short-lived cache.
 
-With no usable authority manifest, `IMagicControlServiceResolver` may return these routes with:
+When no usable authority manifest exists **and the application has never accepted a signed Secured policy**, `IMagicControlServiceResolver` may return these routes with:
 
 ```csharp
 result.TrustLevel == MagicControlPeerTrustLevel.IdentityVerified
@@ -97,6 +98,8 @@ Identity-verified means the advertisement was signed by the advertised persisten
 
 When a valid secured manifest exists, direct advertisements are returned only if the manifest contains the exact node ID, credential ID, public key, application name, and approved or retiring credential. Those routes are marked `AuthorityApproved`. Unapproved direct peers are filtered out.
 
+After the application has accepted any signed Secured policy, a persistent `secured-policy.lock` marker prevents fallback to identity-only routes when the manifest is missing, corrupt, expired, or temporarily unavailable. The marker contains no secret; file presence is deliberately the security signal so truncated contents remain fail-closed.
+
 Direct discovery can be disabled or tightened:
 
 ```csharp
@@ -106,7 +109,7 @@ client.AllowIdentityVerifiedPeersWithoutAuthority = false;
 
 The peer multicast address, port, advertisement TTL, query interval, and encrypted cache duration are configurable for environments with unusual networking requirements.
 
-## Secured enrollment
+## Secured enrollment and live transition
 
 For a secured group, first startup works without a manually pasted authority key:
 
@@ -115,8 +118,21 @@ For a secured group, first startup works without a manually pasted authority key
 3. MagicControl Web displays the node fingerprint, pairing code, configured group, application schema, and requested capabilities.
 4. An enrollment administrator approves that exact credential and nonce.
 5. The running application automatically receives the initial signed group manifest, installs the Web authority pin, receives its node-specific settings snapshot, and begins normal refresh.
+6. Before publishing the manifest to request-time consumers, the client closes the in-memory access gate and persists the secured-policy latch.
+7. The next request and service-resolution call use secured behavior; no process restart is required.
 
 Discovery identifies candidates; it does not establish trust. Administrator approval of the proof-bound request establishes the first authority relationship.
+
+Once secured, absence is never interpreted as permission to reopen. The application remains secured through:
+
+- Web or Mesh outages;
+- restarts;
+- missing or unreadable ordinary client state;
+- missing, corrupt, or expired manifests;
+- an empty direct-peer cache;
+- discovery of new unmanaged applications.
+
+Only a successfully validated authority manifest explicitly declaring the group `Open` clears the persistent latch. Opening is ordered fail-safe: the client removes the persistent marker first and only then relaxes the in-memory request gate. A different authority is not silently trusted; moving to another control plane requires an explicit trust-reset and re-enrollment decision rather than connectivity loss being treated as a rebind.
 
 MagicSettings credential rotation preserves the logical node and approval through its continuity proof. A destructive identity reset creates a new node and requires approval again.
 
@@ -174,6 +190,14 @@ public IActionResult Status() => Ok();
 public IActionResult CreateOrder() => Ok();
 ```
 
+These attributes are dynamic policies:
+
+- before any signed Secured policy is accepted, they allow normal open application access;
+- after secured approval, they immediately require an approved credential and group membership;
+- capability attributes additionally require the published capability;
+- a known secured policy remains fail-closed when its finite offline lease expires;
+- a missing manifest cannot downgrade a persisted secured application.
+
 `IMagicControlAuthorizationService` remains available for manual checks and complete directory lookup. Direct peer discovery never causes these authority-backed checks to downgrade to identity-only authorization.
 
 ## Service discovery and routing
@@ -200,12 +224,13 @@ Route preference is loopback, LAN, private routed address, then public address. 
 
 - Web owns approval, settings publication, revocation, and signatures.
 - Mesh caches signed manifests and approved offline-safe node snapshots.
-- Clients keep encrypted last-known-good authorization, permitted settings, and a separate short-lived direct peer cache.
-- Existing approved applications continue communicating directly when Web is unavailable.
+- Clients keep encrypted last-known-good authorization, permitted settings, a separate short-lived direct peer cache, and a non-secret sticky secured-policy marker.
+- Existing approved applications continue communicating directly when Web is unavailable while their authority-signed offline policy permits it.
 - Existing approved applications can recover cached state through Mesh when Web is unavailable.
-- Applications with no platform can still discover identity-verified peers directly.
+- Applications that have never been secured can still discover identity-verified peers directly.
+- Applications that have been secured never fall back to identity-only routing or open request access during an outage.
 - New enrollment and live-only secret retrieval require Web.
-- A finite group offline lease expires from the authority-signed manifest issue time; reaching a stale Mesh cannot extend it.
+- A finite group offline lease expires from the authority-signed manifest issue time; reaching a stale Mesh cannot extend it, and expiry remains fail-closed.
 - Infinite offline trust remains the default for availability-first installations.
 
 ## Deployable components
