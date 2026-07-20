@@ -17,7 +17,6 @@ public sealed class AccountController(
     [AllowAnonymous]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Setup(
-        [FromForm] string username,
         [FromForm] string password,
         [FromForm] string confirmPassword,
         [FromForm] string? setupToken,
@@ -29,7 +28,7 @@ public sealed class AccountController(
         }
 
         var result = await setup.CompleteAsync(
-            new InitialSetupRequest(username, password, confirmPassword),
+            new InitialSetupRequest(password, confirmPassword),
             cancellationToken);
 
         if (!result.Succeeded || result.UserId is null)
