@@ -84,6 +84,19 @@ public sealed class MagicControlClientOptions
             transport ?? uri.Scheme));
     }
 
+    internal string ComputeContextHash(string bootstrapNonce)
+        => MagicControlNodeContext.Compute(
+            GroupId,
+            ApplicationName,
+            DisplayName!,
+            InstanceName,
+            InstanceRole,
+            SiteName,
+            Version,
+            bootstrapNonce,
+            RequestedCapabilities,
+            AdvertisedEndpoints);
+
     internal void Validate()
     {
         if (GroupId == Guid.Empty)
