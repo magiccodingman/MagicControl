@@ -153,6 +153,7 @@ public static class MagicControlClientExtensions
         services.TryAddSingleton<MagicControlManifestCache>();
         services.TryAddSingleton<IMagicControlManifestSource>(provider =>
             provider.GetRequiredService<MagicControlManifestCache>());
+        services.TryAddSingleton(_ => new MagicControlRuntimeSecurityState());
         services.TryAddSingleton<IMagicControlAuthorizationService, MagicControlAuthorizationService>();
         services.TryAddSingleton<MagicControlCachedCredentialRegistry>();
         services.TryAddSingleton<InMemoryMagicReplayCache>();
