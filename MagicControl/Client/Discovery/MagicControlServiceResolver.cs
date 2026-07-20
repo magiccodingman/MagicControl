@@ -80,6 +80,7 @@ public sealed class MagicControlServiceResolver : IMagicControlServiceResolver
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
         var now = nowUtc ?? DateTimeOffset.UtcNow;
         var state = _cache.Get(_options.GroupId);
+        var knownManifest = state?.Manifest;
         var usableManifest = state is not null && state.AllowsOfflineUse(now)
             ? state.Manifest
             : null;
@@ -88,11 +89,12 @@ public sealed class MagicControlServiceResolver : IMagicControlServiceResolver
         if (usableManifest is not null)
         {
             all.AddRange(FromSignedDirectory(usableManifest, applicationName, now));
-        }
-
-        if (usableManifest is not null || _options.AllowIdentityVerifiedPeersWithoutAuthority)
-        {
             all.AddRange(FromDirectPeers(usableManifest, applicationName, now));
+        }
+        else if (knownManifest?.SecurityMode != MagicControlGroupSecurityMode.Secured
+                 && _options.AllowIdentityVerifiedPeersWithoutAuthority)
+        {
+            all.AddRange(FromDirectPeers(null, applicationName, now));
         }
 
         var deduplicated = all
@@ -194,7 +196,7 @@ public sealed class MagicControlServiceResolver : IMagicControlServiceResolver
             MagicControlMember? member = null;
             if (manifest is not null)
             {
-                member = manifest.Members.SingleOrDefault(candidate =>
+                member = manifest.Members.FirstOrDefault(candidate =>
                     candidate.NodeId == advertisement.Identity.NodeId
                     && candidate.CredentialId == advertisement.Identity.CredentialId
                     && candidate.CredentialStatus is MagicCredentialStatus.Approved or MagicCredentialStatus.Retiring
