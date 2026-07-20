@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace MagicControl.Client;
 
@@ -42,34 +43,45 @@ public static class MagicControlClientExtensions
         configure?.Invoke(options);
         options.Validate();
 
+        services.AddMagicControlNodeAuthorization();
         services.AddSingleton(options);
-        services.AddSingleton<MagicControlManifestCache>();
-        services.AddSingleton<IMagicControlManifestSource>(provider =>
-            provider.GetRequiredService<MagicControlManifestCache>());
         services.AddSingleton<IMagicControlManifestStore, FileMagicControlManifestStore>();
         services.AddSingleton<MagicControlManifestValidator>();
         services.AddSingleton<IMagicControlMeshEndpointResolver, ConfiguredMagicControlMeshEndpointResolver>();
-        services.AddSingleton<IMagicControlAuthorizationService, MagicControlAuthorizationService>();
-        services.AddSingleton<MagicControlCachedCredentialRegistry>();
-        services.AddSingleton<InMemoryMagicReplayCache>();
-        services.AddSingleton(provider => new MagicNodeProofVerifier(
-            provider.GetRequiredService<MagicControlCachedCredentialRegistry>(),
-            provider.GetRequiredService<InMemoryMagicReplayCache>()));
         services.AddSingleton<MagicControlClientStatus>();
 
         services.AddHttpClient(MagicControlHttpClients.Mesh)
             .AddMagicNodeAuthentication(MagicControlMeshProtocol.MeshPeerAudience);
+
+        services.AddHostedService<MagicControlClientHostedService>();
+        return services;
+    }
+
+    public static IServiceCollection AddMagicControlNodeAuthorization(
+        this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton<MagicControlManifestCache>();
+        services.TryAddSingleton<IMagicControlManifestSource>(provider =>
+            provider.GetRequiredService<MagicControlManifestCache>());
+        services.TryAddSingleton<IMagicControlAuthorizationService, MagicControlAuthorizationService>();
+        services.TryAddSingleton<MagicControlCachedCredentialRegistry>();
+        services.TryAddSingleton<InMemoryMagicReplayCache>();
+        services.TryAddSingleton(provider => new MagicNodeProofVerifier(
+            provider.GetRequiredService<MagicControlCachedCredentialRegistry>(),
+            provider.GetRequiredService<InMemoryMagicReplayCache>()));
 
         services.AddAuthentication()
             .AddScheme<AuthenticationSchemeOptions, MagicControlNodeAuthenticationHandler>(
                 MagicControlMeshProtocol.NodeAuthenticationScheme,
                 _ => { });
         services.AddAuthorization();
-        services.AddSingleton<IAuthorizationHandler, MagicControlCapabilityHandler>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IAuthorizationHandler, MagicControlCapabilityHandler>());
         services.Replace(ServiceDescriptor.Singleton<IAuthorizationPolicyProvider,
             MagicControlCapabilityPolicyProvider>());
 
-        services.AddHostedService<MagicControlClientHostedService>();
         return services;
     }
 }
