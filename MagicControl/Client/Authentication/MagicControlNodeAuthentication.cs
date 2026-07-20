@@ -152,39 +152,47 @@ public sealed class RequireMagicControlCapabilityAttribute : AuthorizeAttribute
 }
 
 /// <summary>
-/// Represents an application endpoint that is open until a signed secured-group policy is known.
-/// Once a secured manifest arrives, the same policy immediately requires an approved member and,
-/// when specified, the requested capability. A known secured policy never downgrades after expiry.
+/// Represents an endpoint that is open until a signed secured-group policy is accepted. Once
+/// secured, it remains secured through outages, restarts, missing caches, and expired leases until
+/// a validated authority manifest explicitly declares the group Open.
 /// </summary>
 public sealed record MagicControlAccessRequirement(string? Capability) : IAuthorizationRequirement;
 
 public sealed class MagicControlAccessHandler(
-    MagicControlClientOptions options,
-    MagicControlManifestCache cache)
+    MagicControlManifestCache cache,
+    MagicControlRuntimeSecurityState securityState)
     : AuthorizationHandler<MagicControlAccessRequirement>
 {
     protected override Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
         MagicControlAccessRequirement requirement)
     {
-        var state = cache.Get(options.GroupId);
+        var states = cache.GetAll();
+        var securedStates = states
+            .Where(state => state.Manifest.SecurityMode == MagicControlGroupSecurityMode.Secured)
+            .ToArray();
 
-        // With no authority state, or when the authority explicitly declares this group Open,
-        // MagicControl is additive and does not make the application require credentials.
-        if (state is null
-            || state.Manifest.SecurityMode == MagicControlGroupSecurityMode.Open)
+        // Before any authority has secured the application, MagicControl is additive. A signed
+        // Open manifest also leaves these endpoints open. The persistent latch prevents absence
+        // or corruption of the manifest cache from being interpreted as permission to reopen.
+        if (!securityState.RequiresAuthorization && securedStates.Length == 0)
         {
             context.Succeed(requirement);
             return Task.CompletedTask;
         }
 
-        // A known Secured policy remains secured even when its finite offline lease expires.
-        // Authentication will also fail because the credential registry refuses expired state.
-        if (!state.AllowsOfflineUse(DateTimeOffset.UtcNow)
-            || context.User.Identity?.IsAuthenticated != true
-            || !context.User.HasClaim(
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return Task.CompletedTask;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var belongsToUsableSecuredGroup = securedStates.Any(state =>
+            state.AllowsOfflineUse(now)
+            && context.User.HasClaim(
                 MagicControlMeshProtocol.GroupIdClaim,
-                options.GroupId.ToString("D")))
+                state.Manifest.GroupId.ToString("D")));
+        if (!belongsToUsableSecuredGroup)
         {
             return Task.CompletedTask;
         }
