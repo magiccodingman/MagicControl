@@ -10,7 +10,7 @@ public sealed record MagicControlManifestState(
     public MagicControlGroupManifest Manifest => Envelope.Manifest;
 
     public bool AllowsOfflineUse(DateTimeOffset nowUtc)
-        => Manifest.OfflineTrust.AllowsOfflineUse(LastAuthorityContactUtc, nowUtc);
+        => Manifest.OfflineTrust.AllowsOfflineUse(Manifest.IssuedUtc, nowUtc);
 }
 
 public interface IMagicControlManifestSource
@@ -48,11 +48,25 @@ public sealed class MagicControlManifestCache : IMagicControlManifestSource
 
         lock (_gate)
         {
-            if (_groups.TryGetValue(state.Manifest.GroupId, out var existing)
-                && existing.Manifest.SecurityEpoch == state.Manifest.SecurityEpoch
-                && existing.Manifest.Revision > state.Manifest.Revision)
+            if (_groups.TryGetValue(state.Manifest.GroupId, out var existing))
             {
-                return;
+                if (existing.Manifest.Revision > state.Manifest.Revision)
+                {
+                    return;
+                }
+
+                if (existing.Manifest.Revision == state.Manifest.Revision
+                    && existing.Manifest.SecurityEpoch != state.Manifest.SecurityEpoch)
+                {
+                    return;
+                }
+
+                if (existing.Manifest.Revision == state.Manifest.Revision
+                    && existing.Manifest.SecurityEpoch == state.Manifest.SecurityEpoch
+                    && existing.Manifest.IssuedUtc > state.Manifest.IssuedUtc)
+                {
+                    return;
+                }
             }
 
             _groups[state.Manifest.GroupId] = state;
@@ -79,7 +93,10 @@ public sealed class MagicControlManifestCache : IMagicControlManifestSource
                 applicationName,
                 StringComparison.OrdinalIgnoreCase))
             .Where(entry => entry.ExpiresUtc is null || entry.ExpiresUtc >= nowUtc)
-            .OrderBy(entry => entry.Endpoints.Min(endpoint => endpoint.Priority))
+            .OrderBy(entry => entry.Endpoints
+                .Select(endpoint => endpoint.Priority)
+                .DefaultIfEmpty(int.MaxValue)
+                .Min())
             .ThenBy(entry => entry.ManagedInstanceId)
             .ToArray();
     }
