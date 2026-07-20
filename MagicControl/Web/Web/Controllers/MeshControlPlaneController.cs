@@ -20,6 +20,7 @@ public sealed class MeshControlPlaneController(
     MagicNodeProofVerifier proofVerifier,
     IDbContextFactory<MagicControlDbContext> dbFactory,
     MeshManifestService manifests,
+    MeshGroupDirectoryService groups,
     MagicControlAuthoritySigningService authority) : ControllerBase
 {
     [HttpGet("authority")]
@@ -27,50 +28,28 @@ public sealed class MeshControlPlaneController(
     public async Task<IActionResult> GetAuthority(CancellationToken cancellationToken)
         => Ok(await authority.GetAuthorityAsync(cancellationToken));
 
+    [HttpGet("groups")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetGroups(CancellationToken cancellationToken)
+    {
+        if (!await IsApprovedMeshAsync(cancellationToken))
+        {
+            return Unauthorized();
+        }
+
+        return Ok(await groups.GetGroupsAsync(cancellationToken));
+    }
+
     [HttpGet("groups/{groupId:guid}/manifest")]
     [AllowAnonymous]
     public async Task<IActionResult> GetManifest(
         Guid groupId,
         CancellationToken cancellationToken)
     {
-        var proof = DecodeProof();
-        if (proof is null)
+        if (!await IsApprovedMeshAsync(cancellationToken))
         {
             return Unauthorized();
         }
-
-        var verification = await proofVerifier.VerifyAsync(
-            new MagicProofVerificationRequest(
-                proof,
-                MagicControlMeshProtocol.MeshControlPlaneAudience,
-                Request.Method,
-                RequestUri(),
-                EmptyBodyHash(),
-                DateTimeOffset.UtcNow),
-            cancellationToken);
-
-        if (!verification.IsValid)
-        {
-            return Unauthorized();
-        }
-
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var caller = await db.InstanceCredentials
-            .Include(credential => credential.ManagedInstance)
-            .SingleOrDefaultAsync(
-                credential => credential.NodeId == proof.NodeId
-                              && credential.CredentialId == proof.CredentialId,
-                cancellationToken);
-
-        if (caller?.ManagedInstance is null
-            || caller.ManagedInstance.Kind != EnrollmentKind.MeshApi
-            || caller.ManagedInstance.Status != ManagedInstanceStatus.Active)
-        {
-            return Forbid();
-        }
-
-        caller.ManagedInstance.LastSeenUtc = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
 
         try
         {
@@ -104,6 +83,49 @@ public sealed class MeshControlPlaneController(
         {
             return BadRequest(new { error = exception.Message });
         }
+    }
+
+    private async ValueTask<bool> IsApprovedMeshAsync(CancellationToken cancellationToken)
+    {
+        var proof = DecodeProof();
+        if (proof is null)
+        {
+            return false;
+        }
+
+        var verification = await proofVerifier.VerifyAsync(
+            new MagicProofVerificationRequest(
+                proof,
+                MagicControlMeshProtocol.MeshControlPlaneAudience,
+                Request.Method,
+                RequestUri(),
+                EmptyBodyHash(),
+                DateTimeOffset.UtcNow),
+            cancellationToken);
+
+        if (!verification.IsValid)
+        {
+            return false;
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var caller = await db.InstanceCredentials
+            .Include(credential => credential.ManagedInstance)
+            .SingleOrDefaultAsync(
+                credential => credential.NodeId == proof.NodeId
+                              && credential.CredentialId == proof.CredentialId,
+                cancellationToken);
+
+        if (caller?.ManagedInstance is null
+            || caller.ManagedInstance.Kind != EnrollmentKind.MeshApi
+            || caller.ManagedInstance.Status != ManagedInstanceStatus.Active)
+        {
+            return false;
+        }
+
+        caller.ManagedInstance.LastSeenUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     private MagicAuthenticationProof? DecodeProof()
