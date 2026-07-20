@@ -5,6 +5,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Client", "Web\Web.Clien
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MagicControl.Shared", "Shared\MagicControl.Shared.csproj", "{A4BAAA7E-F111-42F6-90A1-2F48AB7E32B1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MagicControl.Client", "Client\MagicControl.Client.csproj", "{69AE485E-468E-4D48-8E64-6289E93DD243}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MagicControl.Mesh", "Mesh\MagicControl.Mesh.csproj", "{25A855C9-5146-4A91-A584-3E21CB384F92}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MagicControl.Tests", "Tests\MagicControl.Tests\MagicControl.Tests.csproj", "{DF550D6C-68C5-49C7-8E25-5303E671FA55}"
 EndProject
 Global
@@ -25,6 +29,14 @@ Global
         {A4BAAA7E-F111-42F6-90A1-2F48AB7E32B1}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {A4BAAA7E-F111-42F6-90A1-2F48AB7E32B1}.Release|Any CPU.ActiveCfg = Release|Any CPU
         {A4BAAA7E-F111-42F6-90A1-2F48AB7E32B1}.Release|Any CPU.Build.0 = Release|Any CPU
+        {69AE485E-468E-4D48-8E64-6289E93DD243}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {69AE485E-468E-4D48-8E64-6289E93DD243}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {69AE485E-468E-4D48-8E64-6289E93DD243}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {69AE485E-468E-4D48-8E64-6289E93DD243}.Release|Any CPU.Build.0 = Release|Any CPU
+        {25A855C9-5146-4A91-A584-3E21CB384F92}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {25A855C9-5146-4A91-A584-3E21CB384F92}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {25A855C9-5146-4A91-A584-3E21CB384F92}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {25A855C9-5146-4A91-A584-3E21CB384F92}.Release|Any CPU.Build.0 = Release|Any CPU
         {DF550D6C-68C5-49C7-8E25-5303E671FA55}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
         {DF550D6C-68C5-49C7-8E25-5303E671FA55}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {DF550D6C-68C5-49C7-8E25-5303E671FA55}.Release|Any CPU.ActiveCfg = Release|Any CPU
