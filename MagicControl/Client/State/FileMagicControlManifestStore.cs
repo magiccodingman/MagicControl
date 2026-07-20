@@ -32,18 +32,25 @@ public sealed class FileMagicControlManifestStore(MagicControlClientOptions opti
             return null;
         }
 
-        await using var stream = new FileStream(
-            _path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            16_384,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        try
+        {
+            await using var stream = new FileStream(
+                _path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                16_384,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-        return await JsonSerializer.DeserializeAsync<StoredMagicControlManifest>(
-            stream,
-            JsonOptions,
-            cancellationToken);
+            return await JsonSerializer.DeserializeAsync<StoredMagicControlManifest>(
+                stream,
+                JsonOptions,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or JsonException)
+        {
+            return null;
+        }
     }
 
     public async ValueTask SaveAsync(
@@ -51,6 +58,8 @@ public sealed class FileMagicControlManifestStore(MagicControlClientOptions opti
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(manifest);
+        EnsureOfflineSafe(manifest.Envelope.Manifest.Settings);
+
         var directory = Path.GetDirectoryName(_path)!;
         Directory.CreateDirectory(directory);
 
@@ -79,6 +88,16 @@ public sealed class FileMagicControlManifestStore(MagicControlClientOptions opti
             {
                 File.Delete(temporaryPath);
             }
+        }
+    }
+
+    private static void EnsureOfflineSafe(MagicControlSettingsSnapshot settings)
+    {
+        if (settings.Values.Any(value => !value.PersistOffline))
+        {
+            throw new InvalidDataException(
+                "The signed fallback manifest contains a setting that is not permitted on disk. " +
+                "Non-persistable settings must be delivered through the live settings channel.");
         }
     }
 
@@ -125,6 +144,12 @@ public sealed class MagicControlManifestValidator(MagicControlClientOptions opti
                 "The manifest authority signature is invalid.");
         }
 
+        if (envelope.Manifest.Settings.Values.Any(value => !value.PersistOffline))
+        {
+            return MagicControlManifestValidationResult.Invalid(
+                "The fallback manifest contains a non-persistable setting.");
+        }
+
         var pinnedPublicKey = options.TrustedAuthorityPublicKey;
         if (string.IsNullOrWhiteSpace(pinnedPublicKey) && File.Exists(_authorityPinPath))
         {
@@ -155,7 +180,7 @@ public sealed class MagicControlManifestValidator(MagicControlClientOptions opti
         }
 
         if (offline && !envelope.Manifest.OfflineTrust.AllowsOfflineUse(
-                stored.LastAuthorityContactUtc,
+                envelope.Manifest.IssuedUtc,
                 nowUtc))
         {
             return MagicControlManifestValidationResult.Invalid(
