@@ -12,7 +12,7 @@ public enum MagicControlSettingScopeKind
 
 public sealed class ApplicationSettingOverride
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid Id { get; set; }
     public Guid ApplicationSchemaId { get; set; }
     public ApplicationSchemaRecord ApplicationSchema { get; set; } = null!;
 
