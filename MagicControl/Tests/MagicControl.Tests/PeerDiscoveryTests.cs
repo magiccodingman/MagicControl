@@ -77,21 +77,7 @@ public sealed class PeerDiscoveryTests
     {
         var options = CreateOptions();
         var signed = CreateSignedAdvertisement(options.GroupId, "Orders");
-        var advertisement = signed.Advertisement;
-        var member = new MagicControlMember(
-            Guid.NewGuid(),
-            EnrollmentKind.ApplicationInstance,
-            advertisement.DisplayName,
-            advertisement.ApplicationName,
-            advertisement.InstanceName,
-            advertisement.InstanceRole,
-            advertisement.SiteName,
-            advertisement.Identity.NodeId,
-            advertisement.Identity.CredentialId,
-            advertisement.Identity.PublicKey,
-            MagicCredentialStatus.Approved,
-            [],
-            ["orders.read"]);
+        var member = CreateApprovedMember(signed.Advertisement);
         var cache = CreateManifestCache(options.GroupId, [member]);
         var peers = new MagicControlPeerDirectory(options);
         Assert.True(peers.Accept(signed, DateTimeOffset.UtcNow));
@@ -104,6 +90,27 @@ public sealed class PeerDiscoveryTests
         Assert.Equal(MagicControlServiceDiscoverySource.DirectPeerLan, result.Source);
         Assert.True(result.IsAuthorityApproved);
         Assert.Equal(member.ManagedInstanceId, result.Instance.ManagedInstanceId);
+    }
+
+    [Fact]
+    public void ServiceResolver_ExpiredSecuredManifestDoesNotDowngradeToIdentityOnly()
+    {
+        var options = CreateOptions();
+        var signed = CreateSignedAdvertisement(options.GroupId, "Orders");
+        var member = CreateApprovedMember(signed.Advertisement);
+        var now = DateTimeOffset.UtcNow;
+        var cache = CreateManifestCache(
+            options.GroupId,
+            [member],
+            issuedUtc: now.AddMinutes(-5),
+            offlineTrust: MagicControlOfflineTrustPolicy.For(TimeSpan.FromSeconds(30)));
+        var peers = new MagicControlPeerDirectory(options);
+        Assert.True(peers.Accept(signed, now));
+        var resolver = new MagicControlServiceResolver(options, cache, peers);
+
+        var result = resolver.Resolve("Orders", now);
+
+        Assert.Null(result);
     }
 
     [Fact]
@@ -167,27 +174,46 @@ public sealed class PeerDiscoveryTests
         return options;
     }
 
+    private static MagicControlMember CreateApprovedMember(
+        MagicControlPeerAdvertisement advertisement)
+        => new(
+            Guid.NewGuid(),
+            EnrollmentKind.ApplicationInstance,
+            advertisement.DisplayName,
+            advertisement.ApplicationName,
+            advertisement.InstanceName,
+            advertisement.InstanceRole,
+            advertisement.SiteName,
+            advertisement.Identity.NodeId,
+            advertisement.Identity.CredentialId,
+            advertisement.Identity.PublicKey,
+            MagicCredentialStatus.Approved,
+            [],
+            ["orders.read"]);
+
     private static MagicControlManifestCache CreateManifestCache(
         Guid groupId,
-        IReadOnlyList<MagicControlMember> members)
+        IReadOnlyList<MagicControlMember> members,
+        DateTimeOffset? issuedUtc = null,
+        MagicControlOfflineTrustPolicy? offlineTrust = null)
     {
-        var now = DateTimeOffset.UtcNow;
+        var issued = issuedUtc ?? DateTimeOffset.UtcNow;
         var manifest = new MagicControlGroupManifest(
             groupId,
             "Home",
             MagicControlGroupSecurityMode.Secured,
             Guid.NewGuid(),
             1,
-            now,
-            MagicControlOfflineTrustPolicy.Infinite,
+            issued,
+            offlineTrust ?? MagicControlOfflineTrustPolicy.Infinite,
             members,
             [],
-            MagicControlSettingsSnapshot.Empty(now));
+            MagicControlSettingsSnapshot.Empty(issued));
         using var authority = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var cache = new MagicControlManifestCache();
         cache.Set(new MagicControlManifestState(
             MagicControlManifestCryptography.Sign(manifest, authority),
-            now,
+            issued,
             LoadedFromDisk: false));
         return cache;
     }
