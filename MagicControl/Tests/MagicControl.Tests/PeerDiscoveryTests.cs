@@ -113,7 +113,7 @@ public sealed class PeerDiscoveryTests
             Path.GetTempPath(),
             "magic-control-peer-cache",
             Guid.NewGuid().ToString("N"));
-        var options = CreateOptions() withStatePath(statePath);
+        var options = CreateOptions().WithStatePath(statePath);
         var signed = CreateSignedAdvertisement(options.GroupId, "Orders");
         var observation = new MagicControlPeerObservation(
             signed,
@@ -130,8 +130,9 @@ public sealed class PeerDiscoveryTests
             var path = Path.Combine(statePath, options.PeerDirectoryFileName);
             var bytes = await File.ReadAllBytesAsync(path);
             Assert.DoesNotContain(
-                Encoding.UTF8.GetBytes("192.168.10.25"),
-                bytes);
+                "192.168.10.25",
+                Encoding.UTF8.GetString(bytes),
+                StringComparison.Ordinal);
 
             using var reopened = new FileMagicControlPeerDirectoryStore(options);
             var loaded = await reopened.LoadAsync();
@@ -165,7 +166,7 @@ public sealed class PeerDiscoveryTests
         return options;
     }
 
-    private static MagicControlClientOptions withStatePath(
+    private static MagicControlClientOptions WithStatePath(
         this MagicControlClientOptions options,
         string statePath)
     {
