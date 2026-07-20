@@ -5,7 +5,8 @@
     <HeaderContent>
         <MudTh>Name</MudTh>
         <MudTh>@(Mesh ? "Site" : "Application / group")</MudTh>
-        <MudTh>Identity</MudTh>
+        <MudTh>Identity / pairing</MudTh>
+        <MudTh>Requested grants</MudTh>
         <MudTh>Endpoint</MudTh>
         <MudTh>Status</MudTh>
         <MudTh>Actions</MudTh>
@@ -14,9 +15,30 @@
         <MudTd DataLabel="Name">@context.DisplayName</MudTd>
         <MudTd DataLabel="Scope">
             @(Mesh ? context.SiteName : $"{context.ApplicationName} / {context.GroupName}")
+            @if (context.GroupId is not null)
+            {
+                <div><small><code>@context.GroupId</code></small></div>
+            }
         </MudTd>
-        <MudTd DataLabel="Identity">
+        <MudTd DataLabel="Identity / pairing">
             <code>@context.Fingerprint[..Math.Min(16, context.Fingerprint.Length)]…</code>
+            @if (!string.IsNullOrWhiteSpace(context.PairingCode))
+            {
+                <div><strong>@context.PairingCode</strong></div>
+            }
+        </MudTd>
+        <MudTd DataLabel="Requested grants">
+            @if (context.RequestedCapabilities is { Count: > 0 })
+            {
+                @foreach (var capability in context.RequestedCapabilities)
+                {
+                    <div><code>@capability</code></div>
+                }
+            }
+            else
+            {
+                <span>Membership only</span>
+            }
         </MudTd>
         <MudTd DataLabel="Endpoint">@context.AdvertisedEndpoint</MudTd>
         <MudTd DataLabel="Status">@context.Status</MudTd>
@@ -26,7 +48,7 @@
                 <MudButton Size="Size.Small"
                            Color="Color.Success"
                            OnClick="@(() => OnApprove.InvokeAsync(context.Id))">
-                    Approve
+                    Approve requested grants
                 </MudButton>
                 <MudButton Size="Size.Small"
                            Color="Color.Error"
