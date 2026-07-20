@@ -1,11 +1,12 @@
 using MagicControl.Client;
+using MagicControl.Mesh;
 using MagicControl.Shared.Mesh;
 using MagicSettings;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var magicSettings = await builder.AddMagicSettingsAsync<MagicControl.Mesh.MagicControlMeshSettings>(
+var magicSettings = await builder.AddMagicSettingsAsync<MagicControlMeshSettings>(
     args,
     options =>
     {
@@ -13,7 +14,7 @@ var magicSettings = await builder.AddMagicSettingsAsync<MagicControl.Mesh.MagicC
         options.ApplicationVersion =
             typeof(Program).Assembly.GetName().Version?.ToString() ?? "development";
         options.SchemaVersion = 1;
-        options.Template = MagicControl.Mesh.MagicControlMeshSettings.CreateDefaults(
+        options.Template = MagicControlMeshSettings.CreateDefaults(
             builder.Environment.IsDevelopment());
         options.Path = "state/mesh";
         options.FileName = "appsettings.json";
@@ -30,14 +31,14 @@ if (magicSettings.ShouldExit)
 
 builder.Services.AddProblemDetails();
 builder.Services.AddMagicControlNodeAuthorization();
-builder.Services.AddSingleton<MagicControl.Mesh.MeshManifestRepository>();
-builder.Services.AddSingleton<MagicControl.Mesh.MeshControlPlaneStatus>();
-builder.Services.AddHostedService<MagicControl.Mesh.MeshControlPlaneSyncService>();
+builder.Services.AddSingleton<MeshManifestRepository>();
+builder.Services.AddSingleton<MeshControlPlaneStatus>();
+builder.Services.AddHostedService<MeshControlPlaneSyncService>();
 
-builder.Services.AddHttpClient(MagicControl.Mesh.MeshHttpClients.ControlPlane, (services, client) =>
+builder.Services.AddHttpClient(MeshHttpClients.ControlPlane, (services, client) =>
     {
         var settings = services.GetRequiredService<
-            IOptionsMonitor<MagicControl.Mesh.MagicControlMeshSettings>>().CurrentValue;
+            IOptionsMonitor<MagicControlMeshSettings>>().CurrentValue;
         var endpoint = new Uri(settings.ControlPlaneEndpoint, UriKind.Absolute);
         client.BaseAddress = endpoint.AbsoluteUri.EndsWith('/', StringComparison.Ordinal)
             ? endpoint
