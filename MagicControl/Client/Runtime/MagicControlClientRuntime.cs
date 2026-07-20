@@ -1,6 +1,5 @@
 using System.Net.Http.Json;
 using MagicControl.Shared.Mesh;
-using MagicSettings;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -164,7 +163,8 @@ public sealed class MagicControlClientHostedService(
 
                 if (!validation.IsValid)
                 {
-                    throw new InvalidDataException(validation.Error);
+                    throw new InvalidDataException(
+                        validation.Error ?? "The Mesh API returned an invalid group manifest.");
                 }
 
                 await store.SaveAsync(stored, cancellationToken);
@@ -189,9 +189,9 @@ public sealed class MagicControlClientHostedService(
     }
 
     private static Uri EnsureTrailingSlash(Uri endpoint)
-        => endpoint.AbsoluteUri.EndsWith('/', StringComparison.Ordinal)
+        => endpoint.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
             ? endpoint
-            : new Uri(endpoint.AbsoluteUri + '/', UriKind.Absolute);
+            : new Uri(endpoint.AbsoluteUri + "/", UriKind.Absolute);
 }
 
 public static class MagicControlHttpClients
