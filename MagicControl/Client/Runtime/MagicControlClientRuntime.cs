@@ -101,6 +101,7 @@ public sealed class MagicControlClientHostedService(
     IHttpClientFactory httpClientFactory,
     IServiceProvider serviceProvider,
     MagicControlClientStatus status,
+    MagicControlRuntimeSecurityState securityState,
     ILogger<MagicControlClientHostedService> logger) : BackgroundService
 {
     private IMagicSettingsControlPlane? _controlPlane;
@@ -159,6 +160,7 @@ public sealed class MagicControlClientHostedService(
         var stored = await store.LoadAsync(cancellationToken);
         if (stored is null)
         {
+            // A persistent secured latch, if present, intentionally remains active.
             return false;
         }
 
@@ -172,9 +174,11 @@ public sealed class MagicControlClientHostedService(
             logger.LogWarning(
                 "The cached MagicControl manifest was ignored: {Reason}",
                 validation.Error);
+            // Invalid or expired cache never clears a previously secured policy.
             return false;
         }
 
+        await securityState.ApplyValidatedManifestAsync(stored.Envelope, cancellationToken);
         cache.Set(new MagicControlManifestState(
             stored.Envelope,
             stored.LastAuthorityContactUtc,
@@ -244,6 +248,7 @@ public sealed class MagicControlClientHostedService(
                         validation.Error ?? "The Mesh API returned an invalid group manifest.");
                 }
 
+                await securityState.ApplyValidatedManifestAsync(envelope, cancellationToken);
                 await store.SaveAsync(stored, cancellationToken);
                 cache.Set(new MagicControlManifestState(envelope, now, LoadedFromDisk: false));
                 status.RecordSuccess(endpoint, now);
