@@ -114,6 +114,7 @@ public static class MagicControlClientExtensions
         services.AddSingleton(validator);
         services.AddSingleton<IMagicControlMeshEndpointResolver>(resolver);
         services.AddSingleton(status);
+        services.AddSingleton<IMagicControlServiceResolver, MagicControlServiceResolver>();
         services.AddMagicControlNodeAuthorization();
         services.AddHttpClient(MagicControlHttpClients.Mesh)
             .AddMagicNodeAuthentication(MagicControlMeshProtocol.MeshPeerAudience);
@@ -169,6 +170,7 @@ public static class MagicControlClientExtensions
         services.AddSingleton<IMagicControlMeshEndpointResolver>(endpointResolver);
         services.AddSingleton(status);
         services.AddSingleton(transport);
+        services.AddSingleton<IMagicControlServiceResolver, MagicControlServiceResolver>();
 
         services.AddMagicControlNodeAuthorization();
         services.AddHttpClient(MagicControlHttpClients.Mesh)
