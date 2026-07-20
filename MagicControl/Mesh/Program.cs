@@ -40,9 +40,9 @@ builder.Services.AddHttpClient(MeshHttpClients.ControlPlane, (services, client) 
         var settings = services.GetRequiredService<
             IOptionsMonitor<MagicControlMeshSettings>>().CurrentValue;
         var endpoint = new Uri(settings.ControlPlaneEndpoint, UriKind.Absolute);
-        client.BaseAddress = endpoint.AbsoluteUri.EndsWith('/', StringComparison.Ordinal)
+        client.BaseAddress = endpoint.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
             ? endpoint
-            : new Uri(endpoint.AbsoluteUri + '/', UriKind.Absolute);
+            : new Uri(endpoint.AbsoluteUri + "/", UriKind.Absolute);
         client.Timeout = TimeSpan.FromSeconds(Math.Max(1, settings.ControlPlaneTimeoutSeconds));
     })
     .AddMagicNodeAuthentication(MagicControlMeshProtocol.MeshControlPlaneAudience);
