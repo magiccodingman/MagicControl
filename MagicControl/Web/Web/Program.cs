@@ -48,6 +48,7 @@ builder.Services.AddMagicControlSecurity(builder.Configuration);
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddSingleton<MagicControlAuthoritySigningService>();
 builder.Services.AddSingleton<MeshManifestService>();
+builder.Services.AddSingleton<MeshGroupDirectoryService>();
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 
