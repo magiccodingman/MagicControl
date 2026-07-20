@@ -47,7 +47,11 @@ public static class MeshApiEndpoints
                 return Results.NotFound();
             }
 
-            var denied = await AuthorizeGroupAsync(context, state.Manifest, authorization);
+            var denied = await AuthorizeGroupAsync(
+                context,
+                state.Manifest,
+                authorization,
+                allowOpen: true);
             return denied ?? Results.Ok(state.Envelope);
         });
 
@@ -64,7 +68,11 @@ public static class MeshApiEndpoints
                 return Results.NotFound();
             }
 
-            var denied = await AuthorizeGroupAsync(context, state.Manifest, authorization);
+            var denied = await AuthorizeGroupAsync(
+                context,
+                state.Manifest,
+                authorization,
+                allowOpen: true);
             if (denied is not null)
             {
                 return denied;
@@ -88,7 +96,11 @@ public static class MeshApiEndpoints
                 return Results.NotFound();
             }
 
-            var denied = await AuthorizeGroupAsync(context, state.Manifest, authorization);
+            var denied = await AuthorizeGroupAsync(
+                context,
+                state.Manifest,
+                authorization,
+                allowOpen: false);
             return denied ?? Results.Ok(state.Manifest.Settings);
         });
 
@@ -98,11 +110,16 @@ public static class MeshApiEndpoints
     private static async ValueTask<IResult?> AuthorizeGroupAsync(
         HttpContext context,
         MagicControlGroupManifest manifest,
-        IMagicControlAuthorizationService authorization)
+        IMagicControlAuthorizationService authorization,
+        bool allowOpen)
     {
         if (manifest.SecurityMode == MagicControlGroupSecurityMode.Open)
         {
-            return null;
+            return allowOpen
+                ? null
+                : Results.Problem(
+                    "MagicControl-distributed settings require a Secured group.",
+                    statusCode: StatusCodes.Status409Conflict);
         }
 
         var authentication = await context.AuthenticateAsync(
