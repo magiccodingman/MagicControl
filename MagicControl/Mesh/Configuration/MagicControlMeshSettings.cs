@@ -1,3 +1,4 @@
+using MagicControl.Shared.Mesh;
 using MagicSettings;
 
 namespace MagicControl.Mesh;
@@ -7,9 +8,15 @@ public sealed class MagicControlMeshSettings
     public MeshLoggingSettings Logging { get; set; } = MeshLoggingSettings.CreateDefaults(false);
     public string AllowedHosts { get; set; } = "*";
     public string ControlPlaneEndpoint { get; set; } = "https://localhost:7443";
+    public string? AdvertisedEndpoint { get; set; }
     public string StatePath { get; set; } = "state/mesh";
     public int RefreshIntervalSeconds { get; set; } = 30;
     public int ControlPlaneTimeoutSeconds { get; set; } = 10;
+
+    public bool EnableLanDiscovery { get; set; } = true;
+    public string DiscoveryMulticastAddress { get; set; } = MagicControlNodeProtocol.DiscoveryMulticastAddress;
+    public int DiscoveryPort { get; set; } = MagicControlNodeProtocol.DiscoveryPort;
+    public int DiscoveryAdvertisementTtlSeconds { get; set; } = 20;
 
     [MagicSensitive]
     public string? TrustedAuthorityPublicKey { get; set; }

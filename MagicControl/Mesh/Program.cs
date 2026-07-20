@@ -13,7 +13,7 @@ var magicSettings = await builder.AddMagicSettingsAsync<MagicControlMeshSettings
         options.ApplicationId = "MagicControl.Mesh";
         options.ApplicationVersion =
             typeof(Program).Assembly.GetName().Version?.ToString() ?? "development";
-        options.SchemaVersion = 1;
+        options.SchemaVersion = 2;
         options.Template = MagicControlMeshSettings.CreateDefaults(
             builder.Environment.IsDevelopment());
         options.Path = "state/mesh";
@@ -32,7 +32,11 @@ if (magicSettings.ShouldExit)
 builder.Services.AddProblemDetails();
 builder.Services.AddMagicControlNodeAuthorization();
 builder.Services.AddSingleton<MeshManifestRepository>();
+builder.Services.AddSingleton<MeshNodeSyncRepository>();
 builder.Services.AddSingleton<MeshControlPlaneStatus>();
+builder.Services.AddSingleton<MagicControlMeshDiscoveryService>();
+builder.Services.AddHostedService(
+    provider => provider.GetRequiredService<MagicControlMeshDiscoveryService>());
 builder.Services.AddHostedService<MeshControlPlaneSyncService>();
 
 builder.Services.AddHttpClient(MeshHttpClients.ControlPlane, (services, client) =>

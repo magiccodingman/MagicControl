@@ -17,6 +17,8 @@ public sealed class ManagedInstance
     public string? Version { get; set; }
     public string CapabilitiesJson { get; set; } = "{}";
     public string MetadataJson { get; set; } = "{}";
+    public string EndpointsJson { get; set; } = "[]";
+    public long DirectorySequence { get; set; }
 
     public Guid? GroupId { get; set; }
     public ControlGroup? Group { get; set; }

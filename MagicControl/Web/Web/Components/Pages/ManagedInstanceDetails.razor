@@ -2,6 +2,8 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject EnrollmentService Enrollment
+@inject ManagedInstanceAdministrationService InstanceAdministration
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Managed instance - MagicControl</PageTitle>
 
@@ -29,13 +31,60 @@ else
         <MudItem xs="12" md="6">
             <MudPaper Class="pa-5">
                 <MudText Typo="Typo.h5" GutterBottom="true">Managed settings</MudText>
-                <MudAlert Severity="Severity.Info">
-                    This is the attachment point for the next settings-distribution slice.
-                    Normal configuration snapshots and on-demand secrets will remain separate.
-                </MudAlert>
+                <MudText>
+                    This instance receives the effective application, site, role, and instance overrides published from the Application settings page.
+                </MudText>
+                <MudButton Href="application-settings"
+                           Variant="Variant.Text"
+                           Color="Color.Primary"
+                           Class="mt-2">
+                    Open application settings
+                </MudButton>
             </MudPaper>
         </MudItem>
     </MudGrid>
+
+    <MudPaper Class="pa-5 mb-6">
+        <MudText Typo="Typo.h5" GutterBottom="true">Approved capabilities</MudText>
+        @if (_capabilities is null || _capabilities.Capabilities.Count == 0)
+        {
+            <MudText>This instance currently has membership only.</MudText>
+        }
+        else
+        {
+            @foreach (var capability in _capabilities.Capabilities)
+            {
+                <div><code>@capability</code></div>
+            }
+        }
+
+        <AuthorizeView Policy="@MagicControlSecurity.RolePolicy(MagicControlRoles.SuperAdministrator)">
+            <Authorized>
+                <MudDivider Class="my-4" />
+                <MudText Typo="Typo.subtitle1" GutterBottom="true">Edit capabilities</MudText>
+                <MudText Typo="Typo.body2" Class="mb-2">
+                    Enter one capability per line. Saving advances the group's signed manifest revision, so clients will converge on the new grants during normal refresh.
+                </MudText>
+                <textarea rows="6"
+                          class="w-100"
+                          @bind="_capabilityText"></textarea>
+                <div class="mt-3">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Disabled="@_savingCapabilities"
+                               OnClick="SaveCapabilitiesAsync">
+                        @(_savingCapabilities ? "Saving…" : "Save capabilities")
+                    </MudButton>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_capabilityMessage))
+                {
+                    <MudAlert Severity="@_capabilitySeverity" Class="mt-3">
+                        @_capabilityMessage
+                    </MudAlert>
+                }
+            </Authorized>
+        </AuthorizeView>
+    </MudPaper>
 
     <MudText Typo="Typo.h5" GutterBottom="true">Approved credentials</MudText>
     <MudTable Items="_detail.Credentials" Hover="true">
@@ -57,7 +106,47 @@ else
 @code {
     [Parameter] public Guid Id { get; set; }
     private ManagedInstanceDetail? _detail;
+    private ManagedInstanceCapabilityState? _capabilities;
+    private string _capabilityText = string.Empty;
+    private bool _savingCapabilities;
+    private string? _capabilityMessage;
+    private Severity _capabilitySeverity = Severity.Info;
 
     protected override async Task OnParametersSetAsync()
-        => _detail = await Enrollment.GetManagedInstanceAsync(Id);
+    {
+        _detail = await Enrollment.GetManagedInstanceAsync(Id);
+        if (_detail is not null)
+        {
+            _capabilities = await InstanceAdministration.GetCapabilitiesAsync(Id);
+            _capabilityText = string.Join(Environment.NewLine, _capabilities.Capabilities);
+        }
+    }
+
+    private async Task SaveCapabilitiesAsync()
+    {
+        _savingCapabilities = true;
+        _capabilityMessage = null;
+        try
+        {
+            var authentication = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var actorId = Guid.Parse(
+                authentication.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var capabilities = _capabilityText
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            await InstanceAdministration.UpdateCapabilitiesAsync(Id, capabilities, actorId);
+            _capabilities = await InstanceAdministration.GetCapabilitiesAsync(Id);
+            _capabilityText = string.Join(Environment.NewLine, _capabilities.Capabilities);
+            _capabilityMessage = "Capabilities were updated and a new signed manifest revision will be published.";
+            _capabilitySeverity = Severity.Success;
+        }
+        catch (Exception exception)
+        {
+            _capabilityMessage = exception.Message;
+            _capabilitySeverity = Severity.Error;
+        }
+        finally
+        {
+            _savingCapabilities = false;
+        }
+    }
 }

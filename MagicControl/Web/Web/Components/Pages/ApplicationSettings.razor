@@ -1,0 +1,348 @@
+@page "/application-settings"
+@rendermode InteractiveServer
+@attribute [RequireMagicControlRole(MagicControlRoles.SuperAdministrator)]
+@inject ApplicationSettingsService Settings
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Application settings - MagicControl</PageTitle>
+
+<MudText Typo="Typo.h3" GutterBottom="true">Application settings</MudText>
+<MudText Typo="Typo.body1" Class="mb-4">
+    Inspect the MagicSettings schema reported by each approved application and publish scoped remote overrides. The application remains the owner of its schema, defaults, local file, and migrations.
+</MudText>
+
+<MudAlert Severity="Severity.Info" Class="mb-5">
+    Application overrides apply first, followed by site, role, and instance overrides. Sensitive values are delivered only through the live secret channel and are never placed in offline caches.
+</MudAlert>
+
+@if (_applications is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_applications.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">
+        No application schema has synchronized yet. An approved application will appear here after its next MagicControl sync.
+    </MudAlert>
+}
+else
+{
+    <div class="mc-field mb-5">
+        <label for="application-schema">Application</label>
+        <select id="application-schema" value="@_selectedSchemaId" @onchange="SelectApplicationAsync">
+            @foreach (var application in _applications)
+            {
+                <option value="@application.Id">
+                    @application.GroupName / @application.ApplicationName · schema @application.SchemaVersion · settings revision @application.SettingsRevision
+                </option>
+            }
+        </select>
+    </div>
+
+    @if (_editor is null)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else
+    {
+        <MudPaper Class="pa-5 mb-5">
+            <MudText Typo="Typo.h5">@_editor.Application.ApplicationName</MudText>
+            <MudText Typo="Typo.caption" Class="mb-4">
+                Group @_editor.Application.GroupName · application @_editor.Application.ApplicationVersion · schema @_editor.Application.SchemaVersion · fingerprint @_editor.Application.SchemaFingerprint
+            </MudText>
+
+            @if (_editor.MigrationReviewItems.Count > 0)
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-4">
+                    This application reported @_editor.MigrationReviewItems.Count migration item(s) requiring review. MagicControl records these items but does not mutate the client-owned settings file.
+                </MudAlert>
+                <table class="table mb-5">
+                    <thead>
+                    <tr>
+                        <th>Path</th>
+                        <th>Operation</th>
+                        <th>Severity</th>
+                        <th>Reason</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in _editor.MigrationReviewItems)
+                    {
+                        <tr>
+                            <td><code>@item.Path</code></td>
+                            <td>@item.Operation</td>
+                            <td>@item.Severity</td>
+                            <td>@item.Reason</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+
+            <MudText Typo="Typo.h6" Class="mb-3">Reported schema</MudText>
+            <table class="table mb-5">
+                <thead>
+                <tr>
+                    <th>Path</th>
+                    <th>Type</th>
+                    <th>Nullable</th>
+                    <th>Sensitive</th>
+                    <th>Remote override</th>
+                    <th>Description</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var setting in _editor.Manifest.Settings.OrderBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase))
+                {
+                    <tr>
+                        <td><code>@setting.Path</code></td>
+                        <td>@setting.Type</td>
+                        <td>@(setting.Nullable ? "Yes" : "No")</td>
+                        <td>@(setting.Sensitive ? "Yes" : "No")</td>
+                        <td>@(setting.RemoteOverrideAllowed ? "Allowed" : "Client-owned only")</td>
+                        <td>@setting.Description</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </MudPaper>
+
+        <MudPaper Class="pa-5 mb-5">
+            <MudText Typo="Typo.h5" Class="mb-4">Publish override</MudText>
+
+            @if (!string.IsNullOrWhiteSpace(_message))
+            {
+                <MudAlert Severity="@_messageSeverity" Class="mb-4">@_message</MudAlert>
+            }
+
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <div class="mc-field">
+                        <label for="setting-path">Setting</label>
+                        <select id="setting-path" @bind="_path">
+                            @foreach (var setting in _editor.Manifest.Settings
+                                .Where(candidate => candidate.RemoteOverrideAllowed)
+                                .OrderBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <option value="@setting.Path">@setting.Path (@setting.Type)</option>
+                            }
+                        </select>
+                    </div>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <div class="mc-field">
+                        <label for="scope-kind">Scope</label>
+                        <select id="scope-kind" @bind="_scopeKind">
+                            @foreach (var scope in Enum.GetValues<MagicControlSettingScopeKind>())
+                            {
+                                <option value="@scope">@scope</option>
+                            }
+                        </select>
+                    </div>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <div class="mc-field">
+                        <label for="scope-value">Scope value</label>
+                        <input id="scope-value"
+                               disabled="@(_scopeKind == MagicControlSettingScopeKind.Application)"
+                               placeholder="site, role, instance name or ID"
+                               @bind="_scopeValue" />
+                    </div>
+                </MudItem>
+                <MudItem xs="12">
+                    <div class="mc-field">
+                        <label for="setting-value">Value</label>
+                        <textarea id="setting-value"
+                                  rows="3"
+                                  placeholder="Strings may be entered directly; objects, arrays, booleans, and numbers may use JSON."
+                                  @bind="_value"></textarea>
+                    </div>
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <div class="mc-field">
+                        <label for="durability">Durability</label>
+                        <select id="durability" @bind="_durability">
+                            @foreach (var durability in Enum.GetValues<MagicRemoteValueDurability>())
+                            {
+                                <option value="@durability">@durability</option>
+                            }
+                        </select>
+                    </div>
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    <div class="mc-field">
+                        <label><input type="checkbox" @bind="_explicitNull" /> Explicit null</label>
+                        <label><input type="checkbox" @bind="_persistOffline" /> Allow encrypted offline cache</label>
+                        <label><input type="checkbox" @bind="_isSecret" /> Live-only secret</label>
+                    </div>
+                </MudItem>
+            </MudGrid>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Disabled="@_saving"
+                       OnClick="SaveAsync">
+                @(_saving ? "Publishing…" : "Publish override")
+            </MudButton>
+        </MudPaper>
+
+        <MudPaper Class="pa-5">
+            <MudText Typo="Typo.h5" Class="mb-4">Published overrides</MudText>
+            @if (_editor.Overrides.Count == 0)
+            {
+                <MudText>No remote overrides have been published for this application.</MudText>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Path</th>
+                        <th>Scope</th>
+                        <th>Value</th>
+                        <th>Durability</th>
+                        <th>Offline</th>
+                        <th>Revision</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in _editor.Overrides)
+                    {
+                        <tr>
+                            <td><code>@item.Path</code></td>
+                            <td>@item.ScopeKind @(string.IsNullOrWhiteSpace(item.ScopeValue) ? null : $"({item.ScopeValue})")</td>
+                            <td><code>@item.DisplayValue</code></td>
+                            <td>@item.Durability</td>
+                            <td>@(item.PersistOffline ? "Yes" : "No")</td>
+                            <td>@item.Revision</td>
+                            <td>
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Error"
+                                           OnClick="@(() => DeleteAsync(item.Id))">
+                                    Delete
+                                </MudButton>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </MudPaper>
+    }
+}
+
+@code {
+    private IReadOnlyList<ApplicationSettingsApplicationSummary>? _applications;
+    private ApplicationSettingsEditor? _editor;
+    private Guid _selectedSchemaId;
+    private Guid _actorId;
+    private string _path = string.Empty;
+    private MagicControlSettingScopeKind _scopeKind = MagicControlSettingScopeKind.Application;
+    private string _scopeValue = string.Empty;
+    private string _value = string.Empty;
+    private bool _explicitNull;
+    private bool _persistOffline = true;
+    private bool _isSecret;
+    private MagicRemoteValueDurability _durability = MagicRemoteValueDurability.Sticky;
+    private bool _saving;
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authentication = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _actorId = Guid.Parse(authentication.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await ReloadApplicationsAsync();
+    }
+
+    private async Task ReloadApplicationsAsync()
+    {
+        _applications = await Settings.GetApplicationsAsync();
+        if (_applications.Count == 0)
+        {
+            _editor = null;
+            return;
+        }
+
+        if (_selectedSchemaId == Guid.Empty
+            || !_applications.Any(candidate => candidate.Id == _selectedSchemaId))
+        {
+            _selectedSchemaId = _applications[0].Id;
+        }
+        await LoadEditorAsync();
+    }
+
+    private async Task SelectApplicationAsync(ChangeEventArgs args)
+    {
+        if (Guid.TryParse(args.Value?.ToString(), out var selected))
+        {
+            _selectedSchemaId = selected;
+            await LoadEditorAsync();
+        }
+    }
+
+    private async Task LoadEditorAsync()
+    {
+        _editor = await Settings.GetEditorAsync(_selectedSchemaId);
+        _path = _editor.Manifest.Settings
+            .FirstOrDefault(candidate => candidate.RemoteOverrideAllowed)?.Path
+            ?? string.Empty;
+        _message = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_editor is null || string.IsNullOrWhiteSpace(_path))
+        {
+            return;
+        }
+
+        _saving = true;
+        _message = null;
+        try
+        {
+            await Settings.SaveOverrideAsync(
+                _editor.Application.Id,
+                new SaveApplicationSettingOverrideRequest(
+                    _path,
+                    _scopeKind,
+                    _scopeValue,
+                    _value,
+                    _explicitNull,
+                    _durability,
+                    _persistOffline,
+                    _isSecret,
+                    ExpiresUtc: null),
+                _actorId);
+            _message = "The override was published. Approved nodes will receive the new settings revision on their next sync.";
+            _messageSeverity = Severity.Success;
+            await ReloadApplicationsAsync();
+        }
+        catch (Exception exception)
+        {
+            _message = exception.Message;
+            _messageSeverity = Severity.Error;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        try
+        {
+            await Settings.DeleteOverrideAsync(id, _actorId);
+            _message = "The override was deleted.";
+            _messageSeverity = Severity.Success;
+            await ReloadApplicationsAsync();
+        }
+        catch (Exception exception)
+        {
+            _message = exception.Message;
+            _messageSeverity = Severity.Error;
+        }
+    }
+}

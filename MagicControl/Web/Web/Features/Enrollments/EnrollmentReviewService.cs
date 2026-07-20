@@ -61,34 +61,43 @@ public sealed partial class EnrollmentService
         ControlGroup? group = null;
         if (request.Kind == EnrollmentKind.ApplicationInstance)
         {
-            var normalizedGroup = MagicControlNameNormalizer.Normalize(request.GroupName!);
-            group = await db.Groups.SingleOrDefaultAsync(
-                x => x.NormalizedName == normalizedGroup,
-                cancellationToken);
-
-            if (group is null)
+            if (request.GroupId is { } explicitGroupId)
             {
-                group = new ControlGroup
-                {
-                    Name = request.GroupName!.Trim(),
-                    NormalizedName = normalizedGroup,
-                    AllowOpenLocalMembers = true,
-                    SecurityMode = MagicControlGroupSecurityMode.Open,
-                    SecurityEpoch = Guid.NewGuid(),
-                    ManifestRevision = 1,
-                    CreatedUtc = now,
-                    UpdatedUtc = now
-                };
-                db.Groups.Add(group);
+                group = await db.Groups.SingleOrDefaultAsync(
+                    candidate => candidate.Id == explicitGroupId,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        "The group configured by the enrolling application no longer exists.");
             }
             else
             {
-                group.ManifestRevision = checked(Math.Max(1, group.ManifestRevision) + 1);
-                group.UpdatedUtc = now;
-                if (group.SecurityEpoch == Guid.Empty)
+                var normalizedGroup = MagicControlNameNormalizer.Normalize(request.GroupName!);
+                group = await db.Groups.SingleOrDefaultAsync(
+                    candidate => candidate.NormalizedName == normalizedGroup,
+                    cancellationToken);
+
+                if (group is null)
                 {
-                    group.SecurityEpoch = Guid.NewGuid();
+                    group = new ControlGroup
+                    {
+                        Name = request.GroupName!.Trim(),
+                        NormalizedName = normalizedGroup,
+                        AllowOpenLocalMembers = true,
+                        SecurityMode = MagicControlGroupSecurityMode.Open,
+                        SecurityEpoch = Guid.NewGuid(),
+                        ManifestRevision = 1,
+                        CreatedUtc = now,
+                        UpdatedUtc = now
+                    };
+                    db.Groups.Add(group);
                 }
+            }
+
+            group.ManifestRevision = checked(Math.Max(1, group.ManifestRevision) + 1);
+            group.UpdatedUtc = now;
+            if (group.SecurityEpoch == Guid.Empty)
+            {
+                group.SecurityEpoch = Guid.NewGuid();
             }
         }
 
@@ -105,6 +114,8 @@ public sealed partial class EnrollmentService
             Version = request.Version,
             CapabilitiesJson = request.CapabilitiesJson,
             MetadataJson = request.MetadataJson,
+            EndpointsJson = request.EndpointsJson,
+            DirectorySequence = 1,
             Group = group,
             CreatedUtc = now,
             ApprovedUtc = now,
@@ -127,7 +138,12 @@ public sealed partial class EnrollmentService
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new(request.Id, request.Status, "The enrollment request was approved.");
+        return new(
+            request.Id,
+            request.Status,
+            string.IsNullOrWhiteSpace(request.PairingCode)
+                ? "The enrollment request was approved."
+                : $"The enrollment request was approved for pairing code {request.PairingCode}.");
     }
 
     private static AuditEvent CreateReviewAudit(
@@ -147,6 +163,8 @@ public sealed partial class EnrollmentService
             {
                 request.NodeId,
                 request.CredentialId,
+                request.GroupId,
+                request.PairingCode,
                 request.DecisionReason
             }, JsonOptions)
         };

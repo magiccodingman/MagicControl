@@ -16,6 +16,7 @@ public sealed class EnrollmentRequestEntity
 
     public required string DisplayName { get; set; }
     public string? ApplicationName { get; set; }
+    public Guid? GroupId { get; set; }
     public string? GroupName { get; set; }
     public string? InstanceName { get; set; }
     public string? InstanceRole { get; set; }
@@ -23,9 +24,14 @@ public sealed class EnrollmentRequestEntity
     public string? Version { get; set; }
     public string? AdvertisedEndpoint { get; set; }
 
+    public string BootstrapNonce { get; set; } = string.Empty;
+    public string PairingCode { get; set; } = string.Empty;
     public string RequestedRolesJson { get; set; } = "[]";
     public string CapabilitiesJson { get; set; } = "{}";
     public string MetadataJson { get; set; } = "{}";
+    public string EndpointsJson { get; set; } = "[]";
+    public string SchemaManifestJson { get; set; } = "{}";
+    public string MigrationReportJson { get; set; } = "null";
 
     public DateTimeOffset FirstSeenUtc { get; set; }
     public DateTimeOffset LastSeenUtc { get; set; }

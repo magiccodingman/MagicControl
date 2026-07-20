@@ -90,7 +90,9 @@ internal static class MagicControlModelSnapshotBuilder
             b.Property<DateTimeOffset>("ApprovedUtc");
             b.Property<string>("CapabilitiesJson").IsRequired();
             b.Property<DateTimeOffset>("CreatedUtc");
+            b.Property<long>("DirectorySequence");
             b.Property<string>("DisplayName").IsRequired().HasMaxLength(200);
+            b.Property<string>("EndpointsJson").IsRequired();
             b.Property<Guid?>("GroupId");
             b.Property<string>("InstanceName").HasMaxLength(200);
             b.Property<string>("InstanceRole").HasMaxLength(200);
@@ -133,12 +135,15 @@ internal static class MagicControlModelSnapshotBuilder
             b.Property<Guid>("Id");
             b.Property<string>("AdvertisedEndpoint").HasMaxLength(2048);
             b.Property<string>("ApplicationName").HasMaxLength(200);
+            b.Property<string>("BootstrapNonce").IsRequired().HasMaxLength(128);
             b.Property<string>("CapabilitiesJson").IsRequired();
             b.Property<Guid>("CredentialId");
             b.Property<string>("DecisionReason").HasMaxLength(2000);
             b.Property<string>("DisplayName").IsRequired().HasMaxLength(200);
+            b.Property<string>("EndpointsJson").IsRequired();
             b.Property<string>("Fingerprint").IsRequired().HasMaxLength(128);
             b.Property<DateTimeOffset>("FirstSeenUtc");
+            b.Property<Guid?>("GroupId");
             b.Property<string>("GroupName").HasMaxLength(200);
             b.Property<string>("InstanceName").HasMaxLength(200);
             b.Property<string>("InstanceRole").HasMaxLength(200);
@@ -146,20 +151,64 @@ internal static class MagicControlModelSnapshotBuilder
             b.Property<DateTimeOffset>("LastSeenUtc");
             b.Property<Guid?>("ManagedInstanceId");
             b.Property<string>("MetadataJson").IsRequired();
+            b.Property<string>("MigrationReportJson").IsRequired();
             b.Property<Guid>("NodeId");
+            b.Property<string>("PairingCode").IsRequired().HasMaxLength(32);
             b.Property<string>("PublicKey").IsRequired().HasMaxLength(4096);
             b.Property<string>("RequestedRolesJson").IsRequired();
             b.Property<Guid?>("ReviewedByUserId");
             b.Property<DateTimeOffset?>("ReviewedUtc");
+            b.Property<string>("SchemaManifestJson").IsRequired();
             b.Property<string>("SignatureAlgorithm").IsRequired().HasMaxLength(128);
             b.Property<string>("SiteName").HasMaxLength(200);
             b.Property<EnrollmentRequestStatus>("Status").HasConversion<string>().HasMaxLength(64);
             b.Property<string>("Version").HasMaxLength(128);
             b.HasKey("Id");
+            b.HasIndex("GroupId");
             b.HasIndex("ManagedInstanceId");
             b.HasIndex("NodeId", "CredentialId", "Kind").IsUnique();
             b.HasIndex("Status", "Kind", "LastSeenUtc");
             b.ToTable("EnrollmentRequests");
+        });
+
+        modelBuilder.Entity<ApplicationSchemaRecord>(b =>
+        {
+            b.Property<Guid>("Id");
+            b.Property<string>("ApplicationName").IsRequired().HasMaxLength(200);
+            b.Property<string>("ApplicationVersion").IsRequired().HasMaxLength(128);
+            b.Property<DateTimeOffset>("CreatedUtc");
+            b.Property<Guid>("GroupId");
+            b.Property<string>("ManifestJson").IsRequired();
+            b.Property<string>("MigrationReviewJson").IsRequired();
+            b.Property<string>("SchemaFingerprint").IsRequired().HasMaxLength(128);
+            b.Property<int>("SchemaVersion");
+            b.Property<long>("SettingsRevision");
+            b.Property<DateTimeOffset>("UpdatedUtc");
+            b.HasKey("Id");
+            b.HasIndex("GroupId", "ApplicationName").IsUnique();
+            b.ToTable("ApplicationSchemas");
+        });
+
+        modelBuilder.Entity<ApplicationSettingOverride>(b =>
+        {
+            b.Property<Guid>("Id");
+            b.Property<Guid>("ApplicationSchemaId");
+            b.Property<MagicRemoteValueDurability>("Durability").HasConversion<string>().HasMaxLength(32);
+            b.Property<DateTimeOffset?>("ExpiresUtc");
+            b.Property<bool>("IsSecret");
+            b.Property<string>("Path").IsRequired().HasMaxLength(512);
+            b.Property<bool>("PersistOffline");
+            b.Property<string>("ProtectedSecret");
+            b.Property<long>("Revision");
+            b.Property<MagicControlSettingScopeKind>("ScopeKind").HasConversion<string>().HasMaxLength(32);
+            b.Property<string>("ScopeValue").IsRequired().HasMaxLength(256);
+            b.Property<Guid>("UpdatedByUserId");
+            b.Property<DateTimeOffset>("UpdatedUtc");
+            b.Property<string>("ValueJson");
+            b.Property<MagicValueState>("ValueState").HasConversion<string>().HasMaxLength(32);
+            b.HasKey("Id");
+            b.HasIndex("ApplicationSchemaId", "Path", "ScopeKind", "ScopeValue").IsUnique();
+            b.ToTable("ApplicationSettingOverrides");
         });
 
         modelBuilder.Entity<UsedProofNonce>(b =>
@@ -225,6 +274,24 @@ internal static class MagicControlModelSnapshotBuilder
                 .WithMany()
                 .HasForeignKey("ManagedInstanceId")
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ApplicationSchemaRecord>(b =>
+        {
+            b.HasOne<ControlGroup>("Group")
+                .WithMany()
+                .HasForeignKey("GroupId")
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<ApplicationSettingOverride>(b =>
+        {
+            b.HasOne<ApplicationSchemaRecord>("ApplicationSchema")
+                .WithMany("Overrides")
+                .HasForeignKey("ApplicationSchemaId")
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
     }
 }
