@@ -14,6 +14,8 @@ public sealed class MagicControlDbContext(DbContextOptions<MagicControlDbContext
     public DbSet<ManagedInstance> ManagedInstances => Set<ManagedInstance>();
     public DbSet<InstanceCredential> InstanceCredentials => Set<InstanceCredential>();
     public DbSet<EnrollmentRequestEntity> EnrollmentRequests => Set<EnrollmentRequestEntity>();
+    public DbSet<ApplicationSchemaRecord> ApplicationSchemas => Set<ApplicationSchemaRecord>();
+    public DbSet<ApplicationSettingOverride> ApplicationSettingOverrides => Set<ApplicationSettingOverride>();
     public DbSet<UsedProofNonce> UsedProofNonces => Set<UsedProofNonce>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
@@ -87,6 +89,7 @@ public sealed class MagicControlDbContext(DbContextOptions<MagicControlDbContext
             entity.Property(x => x.Version).HasMaxLength(128);
             entity.Property(x => x.CapabilitiesJson).IsRequired();
             entity.Property(x => x.MetadataJson).IsRequired();
+            entity.Property(x => x.EndpointsJson).IsRequired();
             entity.HasOne(x => x.Group)
                 .WithMany(x => x.Instances)
                 .HasForeignKey(x => x.GroupId)
@@ -128,6 +131,14 @@ public sealed class MagicControlDbContext(DbContextOptions<MagicControlDbContext
             entity.Property(x => x.SiteName).HasMaxLength(200);
             entity.Property(x => x.Version).HasMaxLength(128);
             entity.Property(x => x.AdvertisedEndpoint).HasMaxLength(2048);
+            entity.Property(x => x.BootstrapNonce).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.PairingCode).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.RequestedRolesJson).IsRequired();
+            entity.Property(x => x.CapabilitiesJson).IsRequired();
+            entity.Property(x => x.MetadataJson).IsRequired();
+            entity.Property(x => x.EndpointsJson).IsRequired();
+            entity.Property(x => x.SchemaManifestJson).IsRequired();
+            entity.Property(x => x.MigrationReportJson).IsRequired();
             entity.Property(x => x.DecisionReason).HasMaxLength(2000);
             entity.HasOne(x => x.ManagedInstance)
                 .WithMany()
@@ -135,6 +146,47 @@ public sealed class MagicControlDbContext(DbContextOptions<MagicControlDbContext
                 .OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(x => new { x.NodeId, x.CredentialId, x.Kind }).IsUnique();
             entity.HasIndex(x => new { x.Status, x.Kind, x.LastSeenUtc });
+            entity.HasIndex(x => x.GroupId);
+        });
+
+        modelBuilder.Entity<ApplicationSchemaRecord>(entity =>
+        {
+            entity.ToTable("ApplicationSchemas");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ApplicationName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.ApplicationVersion).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.SchemaFingerprint).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.ManifestJson).IsRequired();
+            entity.Property(x => x.MigrationReviewJson).IsRequired();
+            entity.HasOne(x => x.Group)
+                .WithMany()
+                .HasForeignKey(x => x.GroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => new { x.GroupId, x.ApplicationName }).IsUnique();
+        });
+
+        modelBuilder.Entity<ApplicationSettingOverride>(entity =>
+        {
+            entity.ToTable("ApplicationSettingOverrides");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Path).HasMaxLength(512).IsRequired();
+            entity.Property(x => x.ScopeKind).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.ScopeValue).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.ValueState).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Durability).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.ValueJson);
+            entity.Property(x => x.ProtectedSecret);
+            entity.HasOne(x => x.ApplicationSchema)
+                .WithMany(x => x.Overrides)
+                .HasForeignKey(x => x.ApplicationSchemaId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => new
+            {
+                x.ApplicationSchemaId,
+                x.Path,
+                x.ScopeKind,
+                x.ScopeValue
+            }).IsUnique();
         });
 
         modelBuilder.Entity<UsedProofNonce>(entity =>
