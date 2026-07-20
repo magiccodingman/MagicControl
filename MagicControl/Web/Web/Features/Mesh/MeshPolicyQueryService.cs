@@ -1,3 +1,4 @@
+using MagicControl.Shared.Enrollments;
 using MagicControl.Shared.Mesh;
 using MagicControl.Web.Data.Entities;
 using Microsoft.EntityFrameworkCore;
