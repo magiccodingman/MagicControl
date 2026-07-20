@@ -34,6 +34,7 @@ public static class MagicControlClientExtensions
         var clientStateStore = new FileMagicControlClientStateStore(clientOptions);
         var persistentState = await clientStateStore.LoadAsync(cancellationToken);
         clientOptions.TrustedAuthorityPublicKey ??= persistentState.AuthorityPublicKey;
+        var contextHash = clientOptions.ComputeContextHash(persistentState.BootstrapNonce);
 
         var validator = new MagicControlManifestValidator(clientOptions);
         var status = new MagicControlClientStatus();
@@ -48,7 +49,9 @@ public static class MagicControlClientExtensions
             validator,
             cache,
             status);
-        var logicalEndpointResolver = new MagicControlLogicalEndpointResolver(clientOptions);
+        var logicalEndpointResolver = new MagicControlLogicalEndpointResolver(
+            clientOptions,
+            contextHash);
 
         var initialization = await builder.AddMagicSettingsAsync<TSettings>(
             args,
@@ -61,7 +64,9 @@ public static class MagicControlClientExtensions
                 settings.ControlPlaneTransport = transport;
                 settings.ControlPlaneEndpointResolver = logicalEndpointResolver;
                 settings.ControlPlane.Bootstrap.CodeFallbackEndpoint =
-                    MagicControlLogicalUris.ControlPlaneBase(clientOptions.GroupId);
+                    MagicControlLogicalUris.ControlPlaneBase(
+                        clientOptions.GroupId,
+                        contextHash);
                 settings.ControlPlane.Bootstrap.Trust =
                     MagicControlPlaneTrust.SystemTls(MagicControlNodeProtocol.NodeSyncAudience);
                 settings.ControlPlane.Bootstrap.ConnectOnStartup = true;
