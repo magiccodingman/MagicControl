@@ -50,7 +50,7 @@ public static class MagicControlClientExtensions
             status);
         var logicalEndpointResolver = new MagicControlLogicalEndpointResolver(clientOptions);
 
-        var initialization = await builder.AddMagicSettingsAsync(
+        var initialization = await builder.AddMagicSettingsAsync<TSettings>(
             args,
             settings =>
             {
