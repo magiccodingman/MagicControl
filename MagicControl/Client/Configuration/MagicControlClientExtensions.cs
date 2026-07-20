@@ -32,6 +32,8 @@ public static class MagicControlClientExtensions
         var cache = new MagicControlManifestCache();
         var manifestStore = new FileMagicControlManifestStore(clientOptions);
         var clientStateStore = new FileMagicControlClientStateStore(clientOptions);
+        var peerDirectory = new MagicControlPeerDirectory(clientOptions);
+        var peerDirectoryStore = new FileMagicControlPeerDirectoryStore(clientOptions);
         var persistentState = await clientStateStore.LoadAsync(cancellationToken);
         clientOptions.TrustedAuthorityPublicKey ??= persistentState.AuthorityPublicKey;
         var contextHash = clientOptions.ComputeContextHash(persistentState.BootstrapNonce);
@@ -86,6 +88,8 @@ public static class MagicControlClientExtensions
                 cache,
                 manifestStore,
                 clientStateStore,
+                peerDirectory,
+                peerDirectoryStore,
                 validator,
                 endpointResolver,
                 status,
@@ -107,6 +111,8 @@ public static class MagicControlClientExtensions
         var cache = new MagicControlManifestCache();
         var manifestStore = new FileMagicControlManifestStore(options);
         var stateStore = new FileMagicControlClientStateStore(options);
+        var peerDirectory = new MagicControlPeerDirectory(options);
+        var peerDirectoryStore = new FileMagicControlPeerDirectoryStore(options);
         var validator = new MagicControlManifestValidator(options);
         var status = new MagicControlClientStatus();
         var resolver = new DiscoveringMagicControlMeshEndpointResolver(options, stateStore);
@@ -116,6 +122,8 @@ public static class MagicControlClientExtensions
         services.AddSingleton<IMagicControlManifestSource>(cache);
         services.AddSingleton<IMagicControlManifestStore>(manifestStore);
         services.AddSingleton<IMagicControlClientStateStore>(stateStore);
+        services.AddSingleton(peerDirectory);
+        services.AddSingleton<IMagicControlPeerDirectoryStore>(peerDirectoryStore);
         services.AddSingleton(validator);
         services.AddSingleton<IMagicControlMeshEndpointResolver>(resolver);
         services.AddSingleton(status);
@@ -124,6 +132,7 @@ public static class MagicControlClientExtensions
         services.AddHttpClient(MagicControlHttpClients.Mesh)
             .AddMagicNodeAuthentication(MagicControlMeshProtocol.MeshPeerAudience);
         services.AddHostedService<MagicControlClientHostedService>();
+        services.AddHostedService<MagicControlPeerDiscoveryService>();
         return services;
     }
 
@@ -161,6 +170,8 @@ public static class MagicControlClientExtensions
         MagicControlManifestCache cache,
         FileMagicControlManifestStore manifestStore,
         FileMagicControlClientStateStore stateStore,
+        MagicControlPeerDirectory peerDirectory,
+        FileMagicControlPeerDirectoryStore peerDirectoryStore,
         MagicControlManifestValidator validator,
         DiscoveringMagicControlMeshEndpointResolver endpointResolver,
         MagicControlClientStatus status,
@@ -171,6 +182,8 @@ public static class MagicControlClientExtensions
         services.AddSingleton<IMagicControlManifestSource>(cache);
         services.AddSingleton<IMagicControlManifestStore>(manifestStore);
         services.AddSingleton<IMagicControlClientStateStore>(stateStore);
+        services.AddSingleton(peerDirectory);
+        services.AddSingleton<IMagicControlPeerDirectoryStore>(peerDirectoryStore);
         services.AddSingleton(validator);
         services.AddSingleton<IMagicControlMeshEndpointResolver>(endpointResolver);
         services.AddSingleton(status);
@@ -181,5 +194,6 @@ public static class MagicControlClientExtensions
         services.AddHttpClient(MagicControlHttpClients.Mesh)
             .AddMagicNodeAuthentication(MagicControlMeshProtocol.MeshPeerAudience);
         services.AddHostedService<MagicControlClientHostedService>();
+        services.AddHostedService<MagicControlPeerDiscoveryService>();
     }
 }
