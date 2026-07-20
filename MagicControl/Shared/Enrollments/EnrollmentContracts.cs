@@ -66,7 +66,10 @@ public sealed record EnrollmentRequestSummary(
     DateTimeOffset FirstSeenUtc,
     DateTimeOffset LastSeenUtc,
     DateTimeOffset? ReviewedUtc,
-    string? DecisionReason);
+    string? DecisionReason,
+    Guid? GroupId = null,
+    string? PairingCode = null,
+    IReadOnlyList<string>? RequestedCapabilities = null);
 
 public sealed record ManagedInstanceSummary(
     Guid Id,
