@@ -5,11 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>MagicControl.Shared</RootNamespace>
     <AssemblyName>MagicControl.Shared</AssemblyName>
-    <IsPackable>true</IsPackable>
-    <PackageId>MagicControl</PackageId>
-    <Title>MagicControl</Title>
-    <Description>Shared MagicControl enrollment contracts and authorization vocabulary for managed applications and Mesh APIs.</Description>
-    <PackageTags>control-plane;authentication;authorization;configuration;mesh</PackageTags>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
