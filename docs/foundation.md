@@ -24,9 +24,11 @@ MagicSettings chooses those defaults when it first generates a settings document
 
 ## First-run setup
 
-A new database has no default administrator or password. Requests to the administrative UI are redirected to `/setup` until the first administrator is created.
+A new database has no default password. Requests to the administrative UI are redirected to `/setup` until the primary administrator is created. Its username is always `admin`; setup displays that value but does not accept a different username.
 
-The setup operation is transactional and inserts a fixed setup-complete record. Concurrent setup attempts cannot create multiple first administrators. Loopback setup requires no additional token. A setup submitted from another machine requires `Setup:RemoteSetupToken`, which should be supplied through a local environment override rather than committed configuration.
+The primary administrator identity is persisted by user ID. It cannot be disabled or lose the Super Administrator role through either the UI or API. Existing installations created before this rule are backfilled by selecting their earliest Super Administrator, so upgrading does not require recreating the database.
+
+The setup operation is transactional and inserts fixed setup-complete and primary-administrator records. Concurrent setup attempts cannot create multiple first administrators. Loopback setup requires no additional token. A setup submitted from another machine requires `Setup:RemoteSetupToken`, which should be supplied through a local environment override rather than committed configuration.
 
 ## Password handling
 
