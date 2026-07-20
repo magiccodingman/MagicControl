@@ -11,6 +11,7 @@ public sealed class MagicControlSettings
     public InitialSetupSettings Setup { get; set; } = new();
     public RecoverySettings AdminRecovery { get; set; } = new();
     public EnrollmentSettings Enrollment { get; set; } = new();
+    public MeshControlPlaneSettings Mesh { get; set; } = new();
 
     public static MagicControlSettings CreateDefaults(bool isDevelopment = false) => new()
     {
@@ -72,4 +73,9 @@ public sealed class EnrollmentSettings
     public bool AllowNewRequests { get; set; } = true;
     public int MaximumRequestBytes { get; set; } = 262_144;
     public int RequestRetentionDays { get; set; } = 90;
+}
+
+public sealed class MeshControlPlaneSettings
+{
+    public string AuthoritySigningKeyPath { get; set; } = "state/control-plane-authority.json";
 }

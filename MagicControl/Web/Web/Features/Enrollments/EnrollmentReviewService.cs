@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MagicControl.Shared.Enrollments;
+using MagicControl.Shared.Mesh;
 using MagicControl.Shared.Utilities;
 using MagicControl.Web.Data.Entities;
 using MagicSettings.Share;
@@ -71,10 +72,23 @@ public sealed partial class EnrollmentService
                 {
                     Name = request.GroupName!.Trim(),
                     NormalizedName = normalizedGroup,
+                    AllowOpenLocalMembers = true,
+                    SecurityMode = MagicControlGroupSecurityMode.Open,
+                    SecurityEpoch = Guid.NewGuid(),
+                    ManifestRevision = 1,
                     CreatedUtc = now,
                     UpdatedUtc = now
                 };
                 db.Groups.Add(group);
+            }
+            else
+            {
+                group.ManifestRevision = checked(Math.Max(1, group.ManifestRevision) + 1);
+                group.UpdatedUtc = now;
+                if (group.SecurityEpoch == Guid.Empty)
+                {
+                    group.SecurityEpoch = Guid.NewGuid();
+                }
             }
         }
 

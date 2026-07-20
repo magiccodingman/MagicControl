@@ -9,6 +9,12 @@
         </MudNavLink>
     </AuthorizeView>
 
+    <AuthorizeView Policy="@MagicControlSecurity.RolePolicy(MagicControlRoles.SuperAdministrator)">
+        <MudNavLink Href="groups" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Security">
+            Groups
+        </MudNavLink>
+    </AuthorizeView>
+
     <AuthorizeView Policy="@MagicControlSecurity.EnrollmentAdministrationPolicy">
         <MudNavLink Href="enrollments" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AppRegistration">
             Enrollment requests

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MagicControl.Client</RootNamespace>
+    <AssemblyName>MagicControl.Client</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>MagicControl.Client</PackageId>
+    <Title>MagicControl Client</Title>
+    <Description>MagicControl discovery, cached authorization, offline manifests, peer authentication, and MagicSettings integration for managed applications.</Description>
+    <PackageTags>control-plane;service-discovery;authentication;authorization;configuration;mesh</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\MagicControl.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="MagicSettings" Version="0.1.0" />
+    <PackageReference Include="MagicSettings.Server" Version="0.1.0" />
+  </ItemGroup>
+</Project>

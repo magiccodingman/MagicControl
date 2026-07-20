@@ -68,6 +68,7 @@ public sealed class MagicControlDbContext(DbContextOptions<MagicControlDbContext
             entity.Property(x => x.Name).HasMaxLength(160).IsRequired();
             entity.Property(x => x.NormalizedName).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(2000);
+            entity.Property(x => x.SecurityMode).HasConversion<string>().HasMaxLength(32);
             entity.HasIndex(x => x.NormalizedName).IsUnique();
         });
 
