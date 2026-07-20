@@ -14,6 +14,7 @@ namespace MagicControl.Web.Features.Users;
 public sealed record UserSummary(
     Guid Id,
     string Username,
+    bool IsPrimaryAdministrator,
     bool IsDisabled,
     bool MustChangePassword,
     IReadOnlyList<string> Roles,
@@ -34,6 +35,8 @@ public sealed class UserAdministrationService(
         CancellationToken cancellationToken = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var primaryId = await PrimaryAdministratorStore.GetOrBackfillAsync(db, cancellationToken);
+
         return await db.Users
             .AsNoTracking()
             .Include(x => x.UserRoles)
@@ -42,6 +45,7 @@ public sealed class UserAdministrationService(
             .Select(x => new UserSummary(
                 x.Id,
                 x.Username,
+                primaryId.HasValue && x.Id == primaryId.Value,
                 x.IsDisabled,
                 x.MustChangePassword,
                 x.UserRoles.Select(r => r.Role.Name).OrderBy(r => r).ToArray(),
@@ -160,12 +164,19 @@ public sealed class UserAdministrationService(
         Guid actorUserId,
         CancellationToken cancellationToken = default)
     {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var primaryId = await PrimaryAdministratorStore.GetOrBackfillAsync(db, cancellationToken);
+
+        if (disabled && primaryId == userId)
+        {
+            throw new InvalidOperationException("The primary administrator cannot be disabled.");
+        }
+
         if (userId == actorUserId && disabled)
         {
             throw new InvalidOperationException("You cannot disable your own account.");
         }
 
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var user = await db.Users
             .Include(x => x.UserRoles)
             .ThenInclude(x => x.Role)
@@ -204,6 +215,7 @@ public sealed class UserAdministrationService(
         CancellationToken cancellationToken = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var primaryId = await PrimaryAdministratorStore.GetOrBackfillAsync(db, cancellationToken);
         var user = await db.Users
             .Include(x => x.UserRoles)
             .ThenInclude(x => x.Role)
@@ -222,6 +234,12 @@ public sealed class UserAdministrationService(
         var removesSuperAdministrator =
             user.UserRoles.Any(x => x.Role.Name == MagicControlRoles.SuperAdministrator)
             && !selected.Contains(MagicControlRoles.SuperAdministrator, StringComparer.Ordinal);
+
+        if (primaryId == userId && removesSuperAdministrator)
+        {
+            throw new InvalidOperationException(
+                "The primary administrator must retain the Super Administrator role.");
+        }
 
         if (userId == actorUserId && removesSuperAdministrator)
         {
