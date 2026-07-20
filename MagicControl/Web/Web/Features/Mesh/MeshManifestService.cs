@@ -87,6 +87,8 @@ public sealed partial class MeshManifestService(
                 },
             members,
             directory,
+            // MagicSettings overrides are node-specific and are delivered through node sync,
+            // never through the group-wide authorization manifest.
             MagicControlSettingsSnapshot.Empty(now));
 
         return await authority.SignAsync(manifest, cancellationToken);
@@ -160,28 +162,81 @@ public sealed partial class MeshManifestService(
         ManagedInstance instance,
         DateTimeOffset observedUtc)
     {
-        if (string.IsNullOrWhiteSpace(instance.AdvertisedEndpoint)
-            || !Uri.TryCreate(instance.AdvertisedEndpoint, UriKind.Absolute, out var endpoint))
+        var endpoints = ReadEndpoints(instance);
+        if (endpoints.Count == 0)
         {
             return null;
         }
 
-        var isLoopback = endpoint.IsLoopback;
+        var lastSeen = instance.LastSeenUtc ?? instance.ApprovedUtc;
         return new MagicControlDirectoryEntry(
             instance.Id,
             instance.ApplicationName,
             instance.InstanceName,
             instance.InstanceRole,
             instance.SiteName,
-            [new MagicControlServiceEndpoint(
-                endpoint,
-                Priority: isLoopback ? 0 : 100,
-                IsLoopback: isLoopback,
-                IsLan: false,
-                Transport: endpoint.Scheme)],
-            instance.LastSeenUtc?.ToUnixTimeMilliseconds()
-                ?? instance.ApprovedUtc.ToUnixTimeMilliseconds(),
-            observedUtc,
-            ExpiresUtc: null);
+            endpoints,
+            instance.DirectorySequence > 0
+                ? instance.DirectorySequence
+                : lastSeen.ToUnixTimeMilliseconds(),
+            lastSeen,
+            lastSeen.AddSeconds(90));
+    }
+
+    private static IReadOnlyList<MagicControlServiceEndpoint> ReadEndpoints(
+        ManagedInstance instance)
+    {
+        try
+        {
+            var announcements = JsonSerializer.Deserialize<
+                IReadOnlyList<MagicControlServiceEndpointAnnouncement>>(
+                instance.EndpointsJson,
+                JsonOptions);
+            if (announcements is { Count: > 0 })
+            {
+                return announcements
+                    .Where(candidate => candidate.Uri.IsAbsoluteUri)
+                    .Select(candidate => new MagicControlServiceEndpoint(
+                        candidate.Uri,
+                        candidate.Priority,
+                        candidate.IsLoopback || candidate.Uri.IsLoopback,
+                        candidate.IsLan,
+                        candidate.Transport))
+                    .OrderBy(candidate => candidate.Priority)
+                    .ThenByDescending(candidate => candidate.IsLoopback)
+                    .ThenByDescending(candidate => candidate.IsLan)
+                    .ToArray();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        if (string.IsNullOrWhiteSpace(instance.AdvertisedEndpoint)
+            || !Uri.TryCreate(instance.AdvertisedEndpoint, UriKind.Absolute, out var fallback))
+        {
+            return [];
+        }
+
+        return [new MagicControlServiceEndpoint(
+            fallback,
+            Priority: fallback.IsLoopback ? 0 : 100,
+            IsLoopback: fallback.IsLoopback,
+            IsLan: IsPrivateAddress(fallback.Host),
+            Transport: fallback.Scheme)];
+    }
+
+    private static bool IsPrivateAddress(string host)
+    {
+        if (!System.Net.IPAddress.TryParse(host, out var address)
+            || address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return false;
+        }
+
+        var bytes = address.GetAddressBytes();
+        return bytes[0] == 10
+               || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+               || (bytes[0] == 192 && bytes[1] == 168);
     }
 }
