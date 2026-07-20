@@ -43,4 +43,24 @@ jobs:
 
       - name: Test
         working-directory: MagicControl
-        run: dotnet test MagicControl.sln --configuration Release --no-build --logger "console;verbosity=normal"
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test MagicControl.sln \
+            --configuration Release \
+            --no-build \
+            --results-directory TestResults \
+            --logger "trx;LogFileName=tests.trx" \
+            --logger "console;verbosity=normal" \
+            2>&1 | tee test.log
+
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: |
+            MagicControl/test.log
+            MagicControl/TestResults/**/*.trx
+          if-no-files-found: error
+          retention-days: 7
