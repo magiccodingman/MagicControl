@@ -18,7 +18,7 @@ public interface ISetupState
     ValueTask<bool> IsCompleteAsync(CancellationToken cancellationToken = default);
 }
 
-public sealed record InitialSetupRequest(string Username, string Password, string ConfirmPassword);
+public sealed record InitialSetupRequest(string Password, string ConfirmPassword);
 public sealed record InitialSetupResult(bool Succeeded, string? Error, Guid? UserId);
 
 public sealed class SetupService(
@@ -58,11 +58,6 @@ public sealed class SetupService(
         InitialSetupRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Username))
-        {
-            return new(false, "A username is required.", null);
-        }
-
         if (request.Password != request.ConfirmPassword)
         {
             return new(false, "The passwords do not match.", null);
@@ -90,16 +85,11 @@ public sealed class SetupService(
 
         var now = DateTimeOffset.UtcNow;
         var roles = await EnsureBuiltInRolesAsync(db, now, cancellationToken);
-        var normalized = MagicControlNameNormalizer.Normalize(request.Username);
-
-        if (await db.Users.AnyAsync(x => x.NormalizedUsername == normalized, cancellationToken))
-        {
-            return new(false, "That username already exists.", null);
-        }
+        var normalized = MagicControlNameNormalizer.Normalize(PrimaryAdministratorStore.Username);
 
         var user = new ControlUser
         {
-            Username = request.Username.Trim(),
+            Username = PrimaryAdministratorStore.Username,
             NormalizedUsername = normalized,
             PasswordHash = string.Empty,
             SecurityStamp = Guid.NewGuid().ToString("N"),
@@ -116,12 +106,19 @@ public sealed class SetupService(
             User = user,
             Role = roles[MagicControlRoles.SuperAdministrator]
         });
-        db.SystemStates.Add(new SystemState
-        {
-            Key = SetupCompleteKey,
-            Value = "true",
-            UpdatedUtc = now
-        });
+        db.SystemStates.AddRange(
+            new SystemState
+            {
+                Key = SetupCompleteKey,
+                Value = "true",
+                UpdatedUtc = now
+            },
+            new SystemState
+            {
+                Key = PrimaryAdministratorStore.StateKey,
+                Value = user.Id.ToString("D"),
+                UpdatedUtc = now
+            });
         db.AuditEvents.Add(new AuditEvent
         {
             OccurredUtc = now,
