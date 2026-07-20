@@ -33,6 +33,13 @@ public sealed class MagicControlClientOptions
     public string ClientStateFileName { get; set; } = "client-state.protected";
     public string PeerDirectoryFileName { get; set; } = "peer-directory.protected";
 
+    /// <summary>
+    /// Presence of this non-secret, permission-restricted marker means this application has
+    /// accepted a signed Secured policy and must not fall back to open behavior merely because
+    /// authority state is temporarily unavailable or unreadable.
+    /// </summary>
+    public string SecurityLatchFileName { get; set; } = "secured-policy.lock";
+
     public MagicControlStartupMode StartupMode { get; set; } = MagicControlStartupMode.CachedFirst;
     public MagicControlRouteSelectionMode RouteSelection { get; set; } = MagicControlRouteSelectionMode.Automatic;
     public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromSeconds(30);
@@ -57,8 +64,8 @@ public sealed class MagicControlClientOptions
 
     /// <summary>
     /// Allows identity-verified direct peers to be returned when no usable authority manifest
-    /// exists. This never grants MagicControl membership or capabilities; secured authorization
-    /// attributes still require authority-approved cached state.
+    /// exists and this application has never accepted a signed Secured policy. This never grants
+    /// membership or capabilities. A sticky secured policy always takes precedence.
     /// </summary>
     public bool AllowIdentityVerifiedPeersWithoutAuthority { get; set; } = true;
 
@@ -128,6 +135,11 @@ public sealed class MagicControlClientOptions
         if (string.IsNullOrWhiteSpace(ApplicationName))
         {
             throw new InvalidOperationException("MagicControl client ApplicationName is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(SecurityLatchFileName))
+        {
+            throw new InvalidOperationException("MagicControl security latch file name is required.");
         }
 
         DisplayName = string.IsNullOrWhiteSpace(DisplayName)
