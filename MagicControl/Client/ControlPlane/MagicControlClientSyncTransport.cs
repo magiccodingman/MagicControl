@@ -17,6 +17,7 @@ public sealed class MagicControlClientSyncTransport :
     private readonly MagicControlManifestValidator _manifestValidator;
     private readonly MagicControlManifestCache _manifestCache;
     private readonly MagicControlClientStatus _status;
+    private readonly MagicControlRuntimeSecurityState _securityState;
     private readonly HttpClient _httpClient;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -27,7 +28,8 @@ public sealed class MagicControlClientSyncTransport :
         IMagicControlManifestStore manifestStore,
         MagicControlManifestValidator manifestValidator,
         MagicControlManifestCache manifestCache,
-        MagicControlClientStatus status)
+        MagicControlClientStatus status,
+        MagicControlRuntimeSecurityState securityState)
     {
         _options = options;
         _endpointResolver = endpointResolver;
@@ -36,6 +38,7 @@ public sealed class MagicControlClientSyncTransport :
         _manifestValidator = manifestValidator;
         _manifestCache = manifestCache;
         _status = status;
+        _securityState = securityState;
 
         _httpClient = new HttpClient(new SocketsHttpHandler
         {
@@ -222,6 +225,9 @@ public sealed class MagicControlClientSyncTransport :
                     validation.Error ?? "MagicControl returned an invalid signed manifest.");
             }
 
+            // Apply security policy before publishing the manifest to request-time consumers.
+            // Secured closes immediately and persists; Open clears the persistent latch first.
+            await _securityState.ApplyValidatedManifestAsync(manifest, cancellationToken);
             await _manifestStore.SaveAsync(stored, cancellationToken);
             _manifestCache.Set(new MagicControlManifestState(
                 manifest,
@@ -303,6 +309,7 @@ public sealed class MagicControlClientSyncTransport :
                 cancellationToken);
             if (validation.IsValid)
             {
+                await _securityState.ApplyValidatedManifestAsync(stored.Envelope, cancellationToken);
                 _manifestCache.Set(new MagicControlManifestState(
                     stored.Envelope,
                     stored.LastAuthorityContactUtc,
@@ -317,6 +324,7 @@ public sealed class MagicControlClientSyncTransport :
             }
         }
 
+        // Do not clear the secured latch just because the manifest or control plane is missing.
         _status.RecordEnrollment(MagicControlEnrollmentState.LocalOnly, reason);
         return new MagicSettingsSyncResponse(
             MagicControlPlaneState.Disconnected,
