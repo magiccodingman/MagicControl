@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MagicControl.Shared.Enrollments;
 using MagicControl.Web.Data.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -117,5 +118,24 @@ public sealed partial class EnrollmentService
             x.FirstSeenUtc,
             x.LastSeenUtc,
             x.ReviewedUtc,
-            x.DecisionReason);
+            x.DecisionReason,
+            x.GroupId,
+            string.IsNullOrWhiteSpace(x.PairingCode) ? null : x.PairingCode,
+            ReadCapabilities(x.CapabilitiesJson));
+
+    private static IReadOnlyList<string> ReadCapabilities(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+                       ?.Keys
+                       .OrderBy(value => value, StringComparer.Ordinal)
+                       .ToArray()
+                   ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 }
