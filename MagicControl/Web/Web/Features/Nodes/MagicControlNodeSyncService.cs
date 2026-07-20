@@ -27,9 +27,23 @@ public sealed class MagicControlNodeSyncService(
         ArgumentNullException.ThrowIfNull(request);
         if (request.GroupId == Guid.Empty
             || string.IsNullOrWhiteSpace(request.ApplicationName)
-            || string.IsNullOrWhiteSpace(request.BootstrapNonce))
+            || string.IsNullOrWhiteSpace(request.BootstrapNonce)
+            || string.IsNullOrWhiteSpace(request.ContextHash))
         {
-            return Faulted(request, "GroupId, ApplicationName, and BootstrapNonce are required.");
+            return Faulted(
+                request,
+                "GroupId, ApplicationName, BootstrapNonce, and ContextHash are required.");
+        }
+
+        var expectedContextHash = MagicControlNodeContext.Compute(request);
+        if (!string.Equals(
+                request.ContextHash,
+                expectedContextHash,
+                StringComparison.Ordinal))
+        {
+            return Faulted(
+                request,
+                "The MagicControl node context hash does not match the supplied enrollment metadata.");
         }
 
         if (!string.Equals(
@@ -224,6 +238,11 @@ public sealed class MagicControlNodeSyncService(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ContextHash))
+        {
+            return new(false, null);
+        }
+
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var credential = await db.InstanceCredentials
             .AsNoTracking()
@@ -251,7 +270,9 @@ public sealed class MagicControlNodeSyncService(
                 request.Secret.Proof,
                 MagicControlNodeProtocol.NodeSyncAudience,
                 "POST",
-                MagicControlLogicalUris.SecretResolve(request.GroupId),
+                MagicControlLogicalUris.SecretResolve(
+                    request.GroupId,
+                    request.ContextHash),
                 MagicSecretProof.ComputeBodySha256(request.Secret.Name),
                 DateTimeOffset.UtcNow),
             cancellationToken);
@@ -348,7 +369,9 @@ public sealed class MagicControlNodeSyncService(
             request.Settings.Proof,
             MagicControlNodeProtocol.NodeSyncAudience,
             "POST",
-            MagicControlLogicalUris.SettingsSync(request.GroupId),
+            MagicControlLogicalUris.SettingsSync(
+                request.GroupId,
+                request.ContextHash),
             MagicSettingsSyncProof.ComputeBodySha256(
                 request.Settings.Identity,
                 request.Settings.Manifest,
