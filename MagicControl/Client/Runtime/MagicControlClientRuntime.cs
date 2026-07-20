@@ -1,5 +1,7 @@
 using System.Net.Http.Json;
 using MagicControl.Shared.Mesh;
+using MagicSettings;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -15,7 +17,7 @@ public sealed class ConfiguredMagicControlMeshEndpointResolver(MagicControlClien
 {
     public ValueTask<IReadOnlyList<Uri>> ResolveAsync(
         CancellationToken cancellationToken = default)
-        => ValueTask.FromResult<IReadOnlyList<Uri>>(options.MeshEndpoints.ToArray());
+        => ValueTask.FromResult<IReadOnlyList<Uri>>(options.MeshEndpointSeeds.ToArray());
 }
 
 public sealed class MagicControlClientStatus
@@ -24,6 +26,8 @@ public sealed class MagicControlClientStatus
     private DateTimeOffset? _lastRefreshUtc;
     private string? _lastError;
     private Uri? _activeMeshEndpoint;
+    private MagicControlEnrollmentState _enrollmentState = MagicControlEnrollmentState.LocalOnly;
+    private string? _pairingCode;
 
     public DateTimeOffset? LastRefreshUtc
     {
@@ -40,6 +44,18 @@ public sealed class MagicControlClientStatus
         get { lock (_gate) return _activeMeshEndpoint; }
     }
 
+    public MagicControlEnrollmentState EnrollmentState
+    {
+        get { lock (_gate) return _enrollmentState; }
+    }
+
+    public string? PairingCode
+    {
+        get { lock (_gate) return _pairingCode; }
+    }
+
+    public bool IsLocalOnly => EnrollmentState == MagicControlEnrollmentState.LocalOnly;
+
     internal void RecordSuccess(Uri endpoint, DateTimeOffset nowUtc)
     {
         lock (_gate)
@@ -47,6 +63,23 @@ public sealed class MagicControlClientStatus
             _activeMeshEndpoint = endpoint;
             _lastRefreshUtc = nowUtc;
             _lastError = null;
+            _enrollmentState = MagicControlEnrollmentState.Approved;
+            _pairingCode = null;
+        }
+    }
+
+    internal void RecordEnrollment(
+        MagicControlEnrollmentState state,
+        string? message,
+        string? pairingCode = null,
+        Uri? endpoint = null)
+    {
+        lock (_gate)
+        {
+            _enrollmentState = state;
+            _lastError = message;
+            _pairingCode = pairingCode;
+            _activeMeshEndpoint = endpoint ?? _activeMeshEndpoint;
         }
     }
 
@@ -66,42 +99,31 @@ public sealed class MagicControlClientHostedService(
     MagicControlManifestCache cache,
     IMagicControlMeshEndpointResolver endpointResolver,
     IHttpClientFactory httpClientFactory,
+    IServiceProvider serviceProvider,
     MagicControlClientStatus status,
     ILogger<MagicControlClientHostedService> logger) : BackgroundService
 {
+    private IMagicSettingsControlPlane? _controlPlane;
+
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        var stored = await store.LoadAsync(cancellationToken);
-        if (stored is not null)
-        {
-            var validation = await validator.ValidateAsync(
-                stored,
-                offline: true,
-                DateTimeOffset.UtcNow,
-                cancellationToken);
+        var cached = await LoadCachedManifestAsync(cancellationToken);
+        _controlPlane = serviceProvider.GetService<IMagicSettingsControlPlane>();
 
-            if (validation.IsValid)
-            {
-                cache.Set(new MagicControlManifestState(
-                    stored.Envelope,
-                    stored.LastAuthorityContactUtc,
-                    LoadedFromDisk: true));
-            }
-            else
-            {
-                logger.LogWarning(
-                    "The cached MagicControl manifest was ignored: {Reason}",
-                    validation.Error);
-            }
-        }
-
-        if (options.StartupMode is MagicControlStartupMode.PreferMesh or MagicControlStartupMode.RequireMesh)
+        if (options.StartupMode is MagicControlStartupMode.PreferConnected
+            or MagicControlStartupMode.RequireApprovedState)
         {
-            var refreshed = await TryRefreshAsync(cancellationToken);
-            if (!refreshed && options.StartupMode == MagicControlStartupMode.RequireMesh)
+            var connected = _controlPlane is not null
+                ? await RefreshControlPlaneAsync(cancellationToken)
+                : await TryLegacyManifestRefreshAsync(cancellationToken);
+
+            if (!connected
+                && !cached
+                && options.StartupMode == MagicControlStartupMode.RequireApprovedState)
             {
                 throw new InvalidOperationException(
-                    status.LastError ?? "MagicControl Mesh was required during startup but could not be reached.");
+                    status.LastError
+                    ?? "MagicControl approved state was required during startup but is unavailable.");
             }
         }
 
@@ -110,11 +132,19 @@ public sealed class MagicControlClientHostedService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (_controlPlane is not null)
+        {
+            // MagicSettings owns polling for the integrated transport. This service only
+            // loads the authorization cache and enforces startup policy.
+            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+            return;
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await TryRefreshAsync(stoppingToken);
+                await TryLegacyManifestRefreshAsync(stoppingToken);
                 await Task.Delay(options.RefreshInterval, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -124,12 +154,59 @@ public sealed class MagicControlClientHostedService(
         }
     }
 
-    private async Task<bool> TryRefreshAsync(CancellationToken cancellationToken)
+    private async ValueTask<bool> LoadCachedManifestAsync(CancellationToken cancellationToken)
+    {
+        var stored = await store.LoadAsync(cancellationToken);
+        if (stored is null)
+        {
+            return false;
+        }
+
+        var validation = await validator.ValidateAsync(
+            stored,
+            offline: true,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        if (!validation.IsValid)
+        {
+            logger.LogWarning(
+                "The cached MagicControl manifest was ignored: {Reason}",
+                validation.Error);
+            return false;
+        }
+
+        cache.Set(new MagicControlManifestState(
+            stored.Envelope,
+            stored.LastAuthorityContactUtc,
+            LoadedFromDisk: true));
+        return true;
+    }
+
+    private async ValueTask<bool> RefreshControlPlaneAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _controlPlane!.RefreshAsync(cancellationToken);
+            return _controlPlane.State == MagicSettings.Share.MagicControlPlaneState.Active;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            status.RecordFailure(exception.Message);
+            logger.LogWarning(
+                exception,
+                "MagicControl could not establish connected state during startup; cached or local-only settings remain active.");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryLegacyManifestRefreshAsync(CancellationToken cancellationToken)
     {
         var endpoints = await endpointResolver.ResolveAsync(cancellationToken);
         if (endpoints.Count == 0)
         {
-            status.RecordFailure("No MagicControl Mesh endpoint is currently known.");
+            status.RecordEnrollment(
+                MagicControlEnrollmentState.LocalOnly,
+                "No MagicControl Mesh endpoint is currently known.");
             return false;
         }
 
