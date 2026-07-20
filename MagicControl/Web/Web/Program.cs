@@ -2,6 +2,7 @@ using MagicControl.Web.Components;
 using MagicControl.Web.Configuration;
 using MagicControl.Web.Data;
 using MagicControl.Web.Features.Dashboard;
+using MagicControl.Web.Features.Mesh;
 using MagicControl.Web.Health;
 using MagicControl.Web.Security;
 using MagicSettings;
@@ -45,6 +46,8 @@ builder.Services.AddMagicControlDatabase(builder.Configuration);
 builder.Services.AddMagicControlDataProtection(builder.Configuration);
 builder.Services.AddMagicControlSecurity(builder.Configuration);
 builder.Services.AddScoped<DashboardService>();
+builder.Services.AddSingleton<MagicControlAuthoritySigningService>();
+builder.Services.AddSingleton<MeshManifestService>();
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 
