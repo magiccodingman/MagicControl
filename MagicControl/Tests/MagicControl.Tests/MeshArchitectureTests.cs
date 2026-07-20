@@ -30,6 +30,23 @@ public sealed class MeshArchitectureTests
     }
 
     [Fact]
+    public void FiniteOfflineTrust_IsAnchoredToAuthorityIssueTime()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var manifest = CreateManifest(
+            MagicControlOfflineTrustPolicy.For(TimeSpan.FromHours(4)),
+            issuedUtc: now.AddHours(-5));
+        using var authority = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var envelope = MagicControlManifestCryptography.Sign(manifest, authority);
+        var state = new MagicControlManifestState(
+            envelope,
+            LastAuthorityContactUtc: now,
+            LoadedFromDisk: false);
+
+        Assert.False(state.AllowsOfflineUse(now));
+    }
+
+    [Fact]
     public void SignedManifest_DetectsTampering()
     {
         using var authority = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -43,6 +60,79 @@ public sealed class MeshArchitectureTests
             Manifest = signed.Manifest with { Revision = signed.Manifest.Revision + 1 }
         };
         Assert.False(MagicControlManifestCryptography.Verify(tampered));
+    }
+
+    [Fact]
+    public void ManifestCache_RejectsRollbackAcrossSecurityEpochs()
+    {
+        using var authority = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var groupId = Guid.NewGuid();
+        var current = CreateManifest(
+            MagicControlOfflineTrustPolicy.Infinite,
+            groupId: groupId,
+            revision: 8,
+            securityEpoch: Guid.NewGuid());
+        var stale = CreateManifest(
+            MagicControlOfflineTrustPolicy.Infinite,
+            groupId: groupId,
+            revision: 7,
+            securityEpoch: Guid.NewGuid(),
+            issuedUtc: current.IssuedUtc.AddMinutes(1));
+        var cache = new MagicControlManifestCache();
+
+        cache.Set(new MagicControlManifestState(
+            MagicControlManifestCryptography.Sign(current, authority),
+            current.IssuedUtc,
+            LoadedFromDisk: false));
+        cache.Set(new MagicControlManifestState(
+            MagicControlManifestCryptography.Sign(stale, authority),
+            stale.IssuedUtc,
+            LoadedFromDisk: false));
+
+        Assert.Equal(8, cache.Get(groupId)?.Manifest.Revision);
+        Assert.Equal(current.SecurityEpoch, cache.Get(groupId)?.Manifest.SecurityEpoch);
+    }
+
+    [Fact]
+    public async Task ManifestStore_RejectsNonPersistableSettings()
+    {
+        var statePath = Path.Combine(
+            Path.GetTempPath(),
+            "magic-control-tests",
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var options = new MagicControlClientOptions
+            {
+                GroupId = Guid.NewGuid(),
+                ApplicationName = "Orders",
+                StatePath = statePath
+            };
+            var store = new FileMagicControlManifestStore(options);
+            var settings = new MagicControlSettingsSnapshot(
+                1,
+                DateTimeOffset.UtcNow,
+                [new MagicControlSettingValue("Secret", "value", PersistOffline: false)]);
+            var manifest = CreateManifest(
+                MagicControlOfflineTrustPolicy.Infinite,
+                groupId: options.GroupId,
+                settings: settings);
+            using var authority = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var stored = new StoredMagicControlManifest(
+                MagicControlManifestCryptography.Sign(manifest, authority),
+                DateTimeOffset.UtcNow);
+
+            await Assert.ThrowsAsync<InvalidDataException>(async () =>
+                await store.SaveAsync(stored));
+        }
+        finally
+        {
+            if (Directory.Exists(statePath))
+            {
+                Directory.Delete(statePath, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -91,13 +181,18 @@ public sealed class MeshArchitectureTests
     }
 
     private static MagicControlGroupManifest CreateManifest(
-        MagicControlOfflineTrustPolicy offlineTrust)
+        MagicControlOfflineTrustPolicy offlineTrust,
+        Guid? groupId = null,
+        long revision = 1,
+        Guid? securityEpoch = null,
+        DateTimeOffset? issuedUtc = null,
+        MagicControlSettingsSnapshot? settings = null)
     {
-        var groupId = Guid.NewGuid();
+        var resolvedGroupId = groupId ?? Guid.NewGuid();
         var memberId = Guid.NewGuid();
         var nodeId = Guid.NewGuid();
         var credentialId = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
+        var now = issuedUtc ?? DateTimeOffset.UtcNow;
         var member = new MagicControlMember(
             memberId,
             EnrollmentKind.ApplicationInstance,
@@ -130,15 +225,15 @@ public sealed class MeshArchitectureTests
             .ToArray();
 
         return new MagicControlGroupManifest(
-            groupId,
+            resolvedGroupId,
             "Home",
             MagicControlGroupSecurityMode.Secured,
-            Guid.NewGuid(),
-            1,
+            securityEpoch ?? Guid.NewGuid(),
+            revision,
             now,
             offlineTrust,
             [member],
             directory,
-            MagicControlSettingsSnapshot.Empty(now));
+            settings ?? MagicControlSettingsSnapshot.Empty(now));
     }
 }
