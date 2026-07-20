@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text.Json;
 using MagicControl.Shared.Mesh;
 using MagicSettings;
@@ -281,7 +282,7 @@ public sealed class MagicControlPeerDiscoveryService(
                 "ANNOUNCE",
                 MagicControlPeerAdvertisementSecurity.Target(advertisement),
                 MagicControlPeerAdvertisementSecurity.ComputeBodySha256(advertisement),
-                TimeSpan.FromSeconds(Math.Min(60, ttlSeconds + 30))),
+                TimeSpan.FromSeconds(Math.Min(300, ttlSeconds + 30))),
             cancellationToken);
         return new SignedMagicControlPeerAdvertisement(advertisement, proof);
     }
