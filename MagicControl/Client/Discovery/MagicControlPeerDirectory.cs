@@ -30,7 +30,7 @@ public sealed class MagicControlPeerDirectory(MagicControlClientOptions options)
     private readonly Dictionary<string, MagicControlPeerObservation> _observations =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public bool Accept(
+    internal bool Accept(
         SignedMagicControlPeerAdvertisement envelope,
         DateTimeOffset receivedUtc,
         bool loadedFromDisk = false)
@@ -80,7 +80,7 @@ public sealed class MagicControlPeerDirectory(MagicControlClientOptions options)
         }
     }
 
-    public IReadOnlyList<MagicControlPeerObservation> Snapshot()
+    internal IReadOnlyList<MagicControlPeerObservation> Snapshot()
     {
         lock (_gate)
         {
