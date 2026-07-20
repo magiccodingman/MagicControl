@@ -100,6 +100,8 @@ public sealed class MagicControlClientSyncTransport :
         MagicSecretRequest request,
         CancellationToken cancellationToken = default)
     {
+        var state = await _stateStore.LoadAsync(cancellationToken);
+        var contextHash = _options.ComputeContextHash(state.BootstrapNonce);
         var endpoints = await _endpointResolver.ResolveAsync(cancellationToken);
         Exception? lastException = null;
 
@@ -115,6 +117,7 @@ public sealed class MagicControlClientSyncTransport :
                     new MagicControlNodeSecretRequest(
                         _options.GroupId,
                         _options.ApplicationName,
+                        contextHash,
                         request),
                     timeout.Token);
 
@@ -149,6 +152,7 @@ public sealed class MagicControlClientSyncTransport :
         CancellationToken cancellationToken)
     {
         var uri = new Uri(EnsureTrailingSlash(meshEndpoint), "api/v1/nodes/sync");
+        var contextHash = _options.ComputeContextHash(state.BootstrapNonce);
         var request = new MagicControlNodeSyncRequest(
             _options.GroupId,
             _options.ApplicationName,
@@ -158,6 +162,7 @@ public sealed class MagicControlClientSyncTransport :
             _options.SiteName,
             _options.Version,
             state.BootstrapNonce,
+            contextHash,
             _options.RequestedCapabilities.ToArray(),
             _options.AdvertisedEndpoints.ToArray(),
             settingsRequest);
