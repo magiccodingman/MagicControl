@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Security.Cryptography;
 using MagicControl.Client;
 using MagicControl.Shared.Mesh;
 using Microsoft.Extensions.Options;
@@ -8,33 +8,28 @@ namespace MagicControl.Mesh;
 public sealed class MeshManifestRepository(
     IOptionsMonitor<MagicControlMeshSettings> settings,
     MagicControlManifestCache cache,
-    ILogger<MeshManifestRepository> logger)
+    ILogger<MeshManifestRepository> logger) : IDisposable
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true
-    };
-
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly string _stateDirectory = Path.GetFullPath(settings.CurrentValue.StatePath);
+    private readonly ProtectedManifestFileCodec _codec = new(
+        settings.CurrentValue.StatePath,
+        "MagicControl.Mesh");
 
     public async ValueTask LoadAsync(CancellationToken cancellationToken = default)
     {
-        var directory = StateDirectory();
-        if (!Directory.Exists(directory))
+        if (!Directory.Exists(_stateDirectory))
         {
             return;
         }
 
-        foreach (var path in Directory.EnumerateFiles(directory, "*.manifest.json"))
+        foreach (var path in Directory.EnumerateFiles(_stateDirectory, "*.manifest.protected"))
         {
             try
             {
-                await using var stream = File.OpenRead(path);
-                var stored = await JsonSerializer.DeserializeAsync<StoredMagicControlManifest>(
-                    stream,
-                    JsonOptions,
-                    cancellationToken);
-                if (stored is null || !await ValidateAsync(stored, offline: true, cancellationToken))
+                var contents = await File.ReadAllBytesAsync(path, cancellationToken);
+                var stored = _codec.Unprotect<StoredMagicControlManifest>(contents);
+                if (!await ValidateAsync(stored, offline: true, cancellationToken))
                 {
                     continue;
                 }
@@ -44,7 +39,8 @@ public sealed class MeshManifestRepository(
                     stored.LastAuthorityContactUtc,
                     LoadedFromDisk: true));
             }
-            catch (Exception exception) when (exception is IOException or JsonException)
+            catch (Exception exception) when (
+                exception is IOException or CryptographicException or InvalidDataException)
             {
                 logger.LogWarning(exception, "Ignoring invalid cached Mesh manifest {Path}.", path);
             }
@@ -66,10 +62,13 @@ public sealed class MeshManifestRepository(
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            var directory = StateDirectory();
-            Directory.CreateDirectory(directory);
-            var path = Path.Combine(directory, $"{envelope.Manifest.GroupId:D}.manifest.json");
+            Directory.CreateDirectory(_stateDirectory);
+            RestrictDirectoryPermissions(_stateDirectory);
+            var path = Path.Combine(
+                _stateDirectory,
+                $"{envelope.Manifest.GroupId:D}.manifest.protected");
             var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            var protectedContents = _codec.Protect(stored);
 
             try
             {
@@ -81,7 +80,7 @@ public sealed class MeshManifestRepository(
                                  16_384,
                                  FileOptions.Asynchronous | FileOptions.WriteThrough))
                 {
-                    await JsonSerializer.SerializeAsync(stream, stored, JsonOptions, cancellationToken);
+                    await stream.WriteAsync(protectedContents, cancellationToken);
                     await stream.FlushAsync(cancellationToken);
                 }
 
@@ -129,7 +128,7 @@ public sealed class MeshManifestRepository(
         }
 
         var configured = settings.CurrentValue.TrustedAuthorityPublicKey;
-        var pinPath = Path.Combine(StateDirectory(), "authority-public-key.txt");
+        var pinPath = Path.Combine(_stateDirectory, "authority-public-key.txt");
         var pinned = configured;
         if (string.IsNullOrWhiteSpace(pinned) && File.Exists(pinPath))
         {
@@ -143,7 +142,8 @@ public sealed class MeshManifestRepository(
                 return false;
             }
 
-            Directory.CreateDirectory(StateDirectory());
+            Directory.CreateDirectory(_stateDirectory);
+            RestrictDirectoryPermissions(_stateDirectory);
             await File.WriteAllTextAsync(
                 pinPath,
                 stored.Envelope.AuthorityPublicKey,
@@ -157,14 +157,27 @@ public sealed class MeshManifestRepository(
             stored.Envelope.AuthorityPublicKey);
     }
 
-    private string StateDirectory()
-        => Path.GetFullPath(settings.CurrentValue.StatePath);
-
     private static void RestrictPermissions(string path)
     {
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
+    }
+
+    private static void RestrictDirectoryPermissions(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    public void Dispose()
+    {
+        _codec.Dispose();
+        _gate.Dispose();
     }
 }
