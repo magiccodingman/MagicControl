@@ -7,8 +7,11 @@
 <PageTitle>Users - MagicControl</PageTitle>
 
 <MudText Typo="Typo.h3" GutterBottom="true">Users</MudText>
-<MudText Typo="Typo.body1" Class="mb-6">
+<MudText Typo="Typo.body1" Class="mb-2">
     Temporary passwords are shown once and are never stored in readable form.
+</MudText>
+<MudText Typo="Typo.body2" Class="mb-6">
+    The primary administrator is permanently protected from being disabled or losing the Super Administrator role.
 </MudText>
 
 @if (!string.IsNullOrWhiteSpace(_message))
@@ -63,7 +66,15 @@ else
             <MudTh>Actions</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="Username">@context.Username</MudTd>
+            <MudTd DataLabel="Username">
+                @context.Username
+                @if (context.IsPrimaryAdministrator)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="ml-2">
+                        Primary
+                    </MudChip>
+                }
+            </MudTd>
             <MudTd DataLabel="Roles">@string.Join(", ", context.Roles)</MudTd>
             <MudTd DataLabel="Status">
                 @(context.IsDisabled ? "Disabled" :
@@ -75,9 +86,14 @@ else
                     Reset password
                 </MudButton>
                 <MudButton Size="Size.Small"
-                           Color="@(context.IsDisabled ? Color.Success : Color.Warning)"
+                           Disabled="@(context.IsPrimaryAdministrator && !context.IsDisabled)"
+                           Color="@(context.IsPrimaryAdministrator && !context.IsDisabled
+                               ? Color.Default
+                               : context.IsDisabled ? Color.Success : Color.Warning)"
                            OnClick="@(() => ToggleDisabledAsync(context))">
-                    @(context.IsDisabled ? "Enable" : "Disable")
+                    @(context.IsPrimaryAdministrator && !context.IsDisabled
+                        ? "Protected"
+                        : context.IsDisabled ? "Enable" : "Disable")
                 </MudButton>
             </MudTd>
         </RowTemplate>
