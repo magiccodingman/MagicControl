@@ -12,7 +12,7 @@ public sealed class MagicControlClientOptions
     public Guid GroupId { get; set; }
     public string ApplicationName { get; set; } = string.Empty;
     public string StatePath { get; set; } = "state/magic-control";
-    public string ManifestFileName { get; set; } = "group-manifest.json";
+    public string ManifestFileName { get; set; } = "group-manifest.protected";
     public MagicControlStartupMode StartupMode { get; set; } = MagicControlStartupMode.CachedFirst;
     public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromSeconds(30);
     public TimeSpan MeshRequestTimeout { get; set; } = TimeSpan.FromSeconds(5);
