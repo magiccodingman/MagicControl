@@ -110,13 +110,19 @@ public sealed class MeshManifestRepository(
         bool offline,
         CancellationToken cancellationToken)
     {
+        var manifest = stored.Envelope.Manifest;
         if (!MagicControlManifestCryptography.Verify(stored.Envelope))
         {
             return false;
         }
 
-        if (offline && !stored.Envelope.Manifest.OfflineTrust.AllowsOfflineUse(
-                stored.LastAuthorityContactUtc,
+        if (manifest.Settings.Values.Any(value => !value.PersistOffline))
+        {
+            return false;
+        }
+
+        if (offline && !manifest.OfflineTrust.AllowsOfflineUse(
+                manifest.IssuedUtc,
                 DateTimeOffset.UtcNow))
         {
             return false;
