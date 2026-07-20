@@ -43,24 +43,35 @@ jobs:
 
       - name: Test
         working-directory: MagicControl
+        run: dotnet test MagicControl.sln --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Pack MagicControl.Client
+        working-directory: MagicControl
+        run: >-
+          dotnet pack MagicControl.sln
+          --configuration Release
+          --no-restore
+          --output ../artifacts/ci-pack
+          -p:PackageVersion=0.0.0-ci
+
+      - name: Validate MagicControl.Client package
         shell: bash
         run: |
-          set -o pipefail
-          dotnet test MagicControl.sln \
-            --configuration Release \
-            --no-build \
-            --results-directory TestResults \
-            --logger "trx;LogFileName=tests.trx" \
-            --logger "console;verbosity=normal" \
-            2>&1 | tee test.log
+          set -euo pipefail
+          package_dir="artifacts/ci-pack"
+          package="$package_dir/MagicControl.Client.0.0.0-ci.nupkg"
+          symbols="$package_dir/MagicControl.Client.0.0.0-ci.snupkg"
 
-      - name: Upload test diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-diagnostics
-          path: |
-            MagicControl/test.log
-            MagicControl/TestResults/**/*.trx
-          if-no-files-found: error
-          retention-days: 7
+          test -f "$package"
+          test -f "$symbols"
+
+          package_count=$(find "$package_dir" -maxdepth 1 -name '*.nupkg' | wc -l)
+          if [[ "$package_count" -ne 1 ]]; then
+            echo "Expected exactly one .nupkg file, found $package_count."
+            find "$package_dir" -maxdepth 1 -type f -print
+            exit 1
+          fi
+
+          unzip -l "$package" | grep -q 'lib/net10.0/MagicControl.Shared.dll'
+          unzip -l "$package" | grep -q '128x128_compressed.png'
+          unzip -l "$package" | grep -q 'README.md'
