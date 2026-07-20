@@ -1,3 +1,4 @@
+using MagicControl.Web.Data;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
