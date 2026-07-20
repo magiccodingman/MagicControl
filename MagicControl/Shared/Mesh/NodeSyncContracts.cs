@@ -46,6 +46,7 @@ public sealed record MagicControlNodeSyncResponse(
     SignedMagicControlGroupManifest? Manifest,
     string BootstrapNonce,
     IReadOnlyList<Uri> MeshEndpoints,
+    string? PairingCode = null,
     string? Message = null,
     TimeSpan? SuggestedPollInterval = null);
 
@@ -62,6 +63,6 @@ public static class MagicControlLogicalUris
     public static Uri SettingsSync(Guid groupId)
         => new(ControlPlaneBase(groupId), "magicsettings/sync");
 
-    public static Uri Secret(Guid groupId, string name)
-        => new(ControlPlaneBase(groupId), $"magicsettings/secrets/{Uri.EscapeDataString(name)}");
+    public static Uri SecretResolve(Guid groupId)
+        => new(ControlPlaneBase(groupId), "magicsettings/secrets/resolve");
 }
