@@ -5,9 +5,10 @@
 
 <MudContainer MaxWidth="MaxWidth.Small" Class="mt-12">
     <MudPaper Elevation="4" Class="pa-8">
-        <MudText Typo="Typo.h4" GutterBottom="true">Create the first administrator</MudText>
+        <MudText Typo="Typo.h4" GutterBottom="true">Create the primary administrator</MudText>
         <MudAlert Severity="Severity.Info" Class="mb-6">
-            MagicControl has no default username or password. This page closes permanently after setup.
+            The primary account is always named <strong>admin</strong> and cannot be disabled after setup.
+            Choose its password below. This page closes permanently after initialization.
         </MudAlert>
 
         @if (!string.IsNullOrWhiteSpace(Error))
@@ -20,7 +21,8 @@
 
             <div class="mc-field">
                 <label for="username">Administrator username</label>
-                <input id="username" name="username" autocomplete="username" required />
+                <input id="username" value="admin" autocomplete="username" disabled />
+                <span class="mc-help">The primary administrator username is fixed.</span>
             </div>
 
             <div class="mc-field">
