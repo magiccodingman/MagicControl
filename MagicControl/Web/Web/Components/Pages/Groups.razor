@@ -1,0 +1,204 @@
+@page "/groups"
+@rendermode InteractiveServer
+@attribute [RequireMagicControlRole(MagicControlRoles.SuperAdministrator)]
+@inject MeshManifestService MeshPolicies
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Groups - MagicControl</PageTitle>
+
+<MudText Typo="Typo.h3" GutterBottom="true">Groups</MudText>
+<MudText Typo="Typo.body1" Class="mb-6">
+    Configure admission security and how long applications may trust their last signed manifest while MagicControl Web is unavailable.
+</MudText>
+
+<MudAlert Severity="Severity.Info" Class="mb-6">
+    Offline trust is infinite by default. A control-plane outage will not eventually stop an otherwise healthy homelab unless you deliberately configure a finite limit.
+</MudAlert>
+
+@if (_editors is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_editors.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">No application groups have been created yet.</MudAlert>
+}
+else
+{
+    @foreach (var editor in _editors)
+    {
+        <MudPaper Class="pa-5 mb-5">
+            <MudText Typo="Typo.h5">@editor.Name</MudText>
+            <MudText Typo="Typo.caption" Class="mb-4">
+                @editor.ActiveInstanceCount active instance(s) · Manifest revision @editor.ManifestRevision
+            </MudText>
+
+            @if (!string.IsNullOrWhiteSpace(editor.Message))
+            {
+                <MudAlert Severity="@editor.MessageSeverity" Class="mb-4">@editor.Message</MudAlert>
+            }
+
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <div class="mc-field">
+                        <label for="security-@editor.Id">Security mode</label>
+                        <select id="security-@editor.Id" @bind="editor.SecurityMode">
+                            <option value="@MagicControlGroupSecurityMode.Open">Open</option>
+                            <option value="@MagicControlGroupSecurityMode.Secured">Secured</option>
+                        </select>
+                        <span class="mc-help">
+                            Secured groups admit only identities present in the latest trusted manifest.
+                        </span>
+                    </div>
+                </MudItem>
+
+                <MudItem xs="12" md="6">
+                    <div class="mc-field">
+                        <label>
+                            <input type="checkbox" @bind="editor.InfiniteOfflineTrust" />
+                            Infinite offline trust
+                        </label>
+                        <span class="mc-help">
+                            Recommended for homelabs and availability-first environments.
+                        </span>
+                    </div>
+
+                    @if (!editor.InfiniteOfflineTrust)
+                    {
+                        <div class="mc-field mt-3">
+                            <label for="offline-hours-@editor.Id">Maximum offline hours</label>
+                            <input id="offline-hours-@editor.Id"
+                                   type="number"
+                                   min="1"
+                                   step="1"
+                                   @bind="editor.OfflineHours" />
+                            <span class="mc-help">
+                                After this period, disconnected secured members fail closed until authority returns.
+                            </span>
+                        </div>
+                    }
+                </MudItem>
+            </MudGrid>
+
+            @if (editor.OriginalSecurityMode == MagicControlGroupSecurityMode.Secured
+                 && editor.SecurityMode == MagicControlGroupSecurityMode.Open)
+            {
+                <MudAlert Severity="Severity.Error" Class="my-4">
+                    Changing this group to Open removes membership enforcement. Any reachable participant speaking the protocol may discover services in this group, and centrally distributed secured settings will no longer be available.
+                </MudAlert>
+                <div class="mc-field mb-4">
+                    <label>
+                        <input type="checkbox" @bind="editor.ConfirmOpenDowngrade" />
+                        I understand that this disables secured admission for the group.
+                    </label>
+                </div>
+            }
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Disabled="@editor.IsSaving"
+                       OnClick="@(() => SaveAsync(editor))">
+                @(editor.IsSaving ? "Saving…" : "Save group policy")
+            </MudButton>
+        </MudPaper>
+    }
+}
+
+@code {
+    private List<GroupPolicyEditor>? _editors;
+    private Guid _actorId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _actorId = Guid.Parse(state.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        var policies = await MeshPolicies.GetPoliciesAsync();
+        _editors = policies.Select(policy => new GroupPolicyEditor(policy)).ToList();
+    }
+
+    private async Task SaveAsync(GroupPolicyEditor editor)
+    {
+        editor.Message = null;
+
+        if (editor.OriginalSecurityMode == MagicControlGroupSecurityMode.Secured
+            && editor.SecurityMode == MagicControlGroupSecurityMode.Open
+            && !editor.ConfirmOpenDowngrade)
+        {
+            editor.Message = "Acknowledge the security warning before changing this group to Open.";
+            editor.MessageSeverity = Severity.Error;
+            return;
+        }
+
+        if (!editor.InfiniteOfflineTrust && editor.OfflineHours < 1)
+        {
+            editor.Message = "Finite offline trust must be at least one hour.";
+            editor.MessageSeverity = Severity.Error;
+            return;
+        }
+
+        editor.IsSaving = true;
+        try
+        {
+            long? maximumOfflineSeconds = editor.InfiniteOfflineTrust
+                ? null
+                : checked((long)Math.Ceiling(editor.OfflineHours * 3600m));
+
+            await MeshPolicies.UpdatePolicyAsync(
+                editor.Id,
+                new UpdateGroupMeshPolicyRequest(editor.SecurityMode, maximumOfflineSeconds),
+                _actorId);
+
+            editor.OriginalSecurityMode = editor.SecurityMode;
+            editor.ConfirmOpenDowngrade = false;
+            editor.ManifestRevision++;
+            editor.Message = editor.InfiniteOfflineTrust
+                ? "Group policy saved with infinite offline trust."
+                : $"Group policy saved with a {editor.OfflineHours:0.##}-hour offline limit.";
+            editor.MessageSeverity = Severity.Success;
+        }
+        catch (Exception exception)
+        {
+            editor.Message = exception.Message;
+            editor.MessageSeverity = Severity.Error;
+        }
+        finally
+        {
+            editor.IsSaving = false;
+        }
+    }
+
+    private sealed class GroupPolicyEditor
+    {
+        public GroupPolicyEditor(GroupMeshPolicySummary policy)
+        {
+            Id = policy.Id;
+            Name = policy.Name;
+            SecurityMode = policy.SecurityMode;
+            OriginalSecurityMode = policy.SecurityMode;
+            InfiniteOfflineTrust = policy.MaximumOfflineSeconds is null;
+            OfflineHours = policy.MaximumOfflineSeconds is null
+                ? 24
+                : Math.Max(1m, policy.MaximumOfflineSeconds.Value / 3600m);
+            ManifestRevision = policy.ManifestRevision;
+            ActiveInstanceCount = policy.ActiveInstanceCount;
+        }
+
+        public Guid Id { get; }
+        public string Name { get; }
+        public MagicControlGroupSecurityMode SecurityMode { get; set; }
+        public MagicControlGroupSecurityMode OriginalSecurityMode { get; set; }
+        public bool InfiniteOfflineTrust { get; set; }
+        public decimal OfflineHours { get; set; }
+        public bool ConfirmOpenDowngrade { get; set; }
+        public bool IsSaving { get; set; }
+        public long ManifestRevision { get; set; }
+        public int ActiveInstanceCount { get; }
+        public string? Message { get; set; }
+        public Severity MessageSeverity { get; set; } = Severity.Info;
+    }
+}
