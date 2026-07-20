@@ -5,8 +5,9 @@ using MagicSettings.Share;
 
 namespace MagicControl.Client;
 
-public sealed class MagicControlLogicalEndpointResolver(MagicControlClientOptions options)
-    : IMagicControlPlaneEndpointResolver
+public sealed class MagicControlLogicalEndpointResolver(
+    MagicControlClientOptions options,
+    string contextHash) : IMagicControlPlaneEndpointResolver
 {
     public MagicResolvedControlPlaneEndpoint Resolve<TSettings>(
         MagicSettingsOptions<TSettings> settings,
@@ -14,7 +15,8 @@ public sealed class MagicControlLogicalEndpointResolver(MagicControlClientOption
         Uri? runtimeOverride = null)
         where TSettings : class, new()
         => new(
-            runtimeOverride ?? MagicControlLogicalUris.ControlPlaneBase(options.GroupId),
+            runtimeOverride
+            ?? MagicControlLogicalUris.ControlPlaneBase(options.GroupId, contextHash),
             runtimeOverride is null
                 ? MagicControlPlaneEndpointSource.CodeFallback
                 : MagicControlPlaneEndpointSource.RuntimeOverride);
