@@ -132,7 +132,7 @@ Once secured, absence is never interpreted as permission to reopen. The applicat
 - an empty direct-peer cache;
 - discovery of new unmanaged applications.
 
-Only a successfully validated authority manifest explicitly declaring the group `Open` clears the persistent latch. Opening is ordered fail-safe: the client removes the persistent marker first and only then relaxes the in-memory request gate. A different authority is not silently trusted; moving to another control plane requires an explicit trust-reset and re-enrollment decision rather than connectivity loss being treated as a rebind.
+Only a successfully validated authority manifest explicitly declaring the group `Open` clears the persistent latch. Opening is ordered fail-safe: the client first durably saves the validated signed Open manifest, then removes the persistent marker, and only then relaxes the in-memory request gate. A crash can therefore leave the application more restrictive, never accidentally open. A different authority is not silently trusted; moving to another control plane requires an explicit trust-reset and re-enrollment decision rather than connectivity loss being treated as a rebind.
 
 MagicSettings credential rotation preserves the logical node and approval through its continuity proof. A destructive identity reset creates a new node and requires approval again.
 
