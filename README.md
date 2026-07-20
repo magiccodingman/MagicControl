@@ -4,7 +4,7 @@ MagicControl is a lightweight application control plane for managing users, appl
 
 ## MagicControl.Client
 
-`MagicControl.Client` is the application-side NuGet package. It initializes MagicSettings, maintains the application's MagicControl identity, refreshes signed group manifests in the background, authorizes peer requests from local cached state, and resolves known service instances without placing the Mesh API in the request path.
+`MagicControl.Client` is the application-side NuGet package. It initializes MagicSettings, maintains the application's MagicControl identity, discovers ordinary applications directly, refreshes signed group manifests when a control plane is available, authorizes peer requests from local cached state, and resolves service instances without placing Mesh in the application request path.
 
 Install the package:
 
@@ -19,14 +19,15 @@ var magicControl = await builder.AddMagicControlClientAsync<MyApplicationSetting
     args,
     configureSettings: settings =>
     {
-        settings.ApplicationId = "Orders";
         settings.Template = new MyApplicationSettings();
     },
     configureClient: client =>
     {
         client.GroupId = Guid.Parse("00000000-0000-0000-0000-000000000000");
         client.ApplicationName = "Orders";
-        client.AddMeshEndpoint("https://magic-control-mesh.example.local");
+        client.AdvertiseEndpoint(
+            "https://orders.internal.example:7443",
+            isLan: true);
     });
 
 if (magicControl.ShouldExit)
@@ -35,7 +36,11 @@ if (magicControl.ShouldExit)
 }
 ```
 
-Applications can protect ASP.NET Core endpoints with `[RequireMagicControlMember]` or `[RequireMagicControlCapability("capability.name")]`. `IMagicControlAuthorizationService` is available for manual authorization and directory resolution.
+`GroupId` and `ApplicationName` are intentionally configured. Mesh endpoints are discovered automatically on ordinary LANs; `AddMeshEndpointOverride(...)` is available only when a routed or multicast-restricted environment needs an explicit seed.
+
+Even with no MagicControl Web deployment, no Mesh API, and no cached signed directory, applications can discover one another through identity-signed direct peer advertisements. Resolver results expose whether a route is merely `IdentityVerified` or is `AuthorityApproved` by a secured cached manifest.
+
+Applications can protect ASP.NET Core endpoints with `[RequireMagicControlMember]` or `[RequireMagicControlCapability("capability.name")]`. Direct discovery never grants these authority-backed permissions. `IMagicControlAuthorizationService` is available for manual authorization, and `IMagicControlServiceResolver` handles signed-directory and direct-peer route selection.
 
 Offline trust is infinite by default. A secured group may instead configure a finite offline trust period from the MagicControl Web control pane.
 
@@ -47,11 +52,12 @@ Offline trust is infinite by default. A secured group may instead configure a fi
 - Cookie authentication, forced password changes, and local-only administrator recovery.
 - User, role, enrollment, managed-instance, and group-policy administration.
 - Signed application and Mesh API enrollment using MagicSettings node identities.
+- Direct identity-signed application discovery without Web or Mesh.
 - Signed multi-group manifests and encrypted last-known-good caches.
 - Open directory discovery and secured-only distributed settings.
 - Local cached peer authentication and capability authorization.
 - Audit records and health checks.
 
-MagicControl Web remains the durable control-plane authority. The Mesh API distributes and caches signed state but is not a required application traffic proxy.
+MagicControl Web remains the durable control-plane authority. Mesh distributes and caches signed state but is not a required application traffic proxy or a prerequisite for ordinary direct LAN discovery.
 
-See [`docs/foundation.md`](docs/foundation.md) and [`docs/mesh-architecture.md`](docs/mesh-architecture.md) for setup, security, and architecture details.
+See [`docs/client-platform.md`](docs/client-platform.md), [`docs/foundation.md`](docs/foundation.md), and [`docs/mesh-architecture.md`](docs/mesh-architecture.md) for setup, security, and architecture details.
