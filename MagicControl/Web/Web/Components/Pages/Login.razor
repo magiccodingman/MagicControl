@@ -1,0 +1,46 @@
+@page "/login"
+@attribute [AllowAnonymous]
+
+<PageTitle>Log in - MagicControl</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-12">
+    <MudPaper Elevation="4" Class="pa-8">
+        <MudText Typo="Typo.h4" GutterBottom="true">Log in</MudText>
+        <MudText Typo="Typo.body2" Class="mb-6">
+            Sign in to administer MagicControl.
+        </MudText>
+
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@Error</MudAlert>
+        }
+
+        <form method="post" action="/account/login">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+
+            <div class="mc-field">
+                <label for="username">Username</label>
+                <input id="username" name="username" autocomplete="username" required />
+            </div>
+
+            <div class="mc-field">
+                <label for="password">Password</label>
+                <input id="password" type="password" name="password"
+                       autocomplete="current-password" required />
+            </div>
+
+            <MudButton ButtonType="ButtonType.Submit"
+                       Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       FullWidth="true">
+                Log in
+            </MudButton>
+        </form>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+}

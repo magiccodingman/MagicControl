@@ -10,6 +10,9 @@ artifacts/
 ## Runtime state and secrets
 **/.magic-ai/
 **/state/
+*.db
+*.db-shm
+*.db-wal
 *.pfx
 *.pem
 *.key

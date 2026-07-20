@@ -1,0 +1,53 @@
+@namespace MagicControl.Web.Components.Enrollments
+@using MagicControl.Shared.Enrollments
+
+<MudTable Items="Requests" Hover="true" Striped="true">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>@(Mesh ? "Site" : "Application / group")</MudTh>
+        <MudTh>Identity</MudTh>
+        <MudTh>Endpoint</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Name">@context.DisplayName</MudTd>
+        <MudTd DataLabel="Scope">
+            @(Mesh ? context.SiteName : $"{context.ApplicationName} / {context.GroupName}")
+        </MudTd>
+        <MudTd DataLabel="Identity">
+            <code>@context.Fingerprint[..Math.Min(16, context.Fingerprint.Length)]…</code>
+        </MudTd>
+        <MudTd DataLabel="Endpoint">@context.AdvertisedEndpoint</MudTd>
+        <MudTd DataLabel="Status">@context.Status</MudTd>
+        <MudTd DataLabel="Actions">
+            @if (context.Status == EnrollmentRequestStatus.Pending)
+            {
+                <MudButton Size="Size.Small"
+                           Color="Color.Success"
+                           OnClick="@(() => OnApprove.InvokeAsync(context.Id))">
+                    Approve
+                </MudButton>
+                <MudButton Size="Size.Small"
+                           Color="Color.Error"
+                           OnClick="@(() => OnReject.InvokeAsync(context.Id))">
+                    Reject
+                </MudButton>
+            }
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<EnrollmentRequestSummary> Requests { get; set; } = [];
+
+    [Parameter]
+    public bool Mesh { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback<Guid> OnApprove { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback<Guid> OnReject { get; set; }
+}

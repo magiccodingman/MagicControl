@@ -1,0 +1,46 @@
+@page "/instances"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject EnrollmentService Enrollment
+
+<PageTitle>Managed instances - MagicControl</PageTitle>
+
+<MudText Typo="Typo.h3" GutterBottom="true">Managed instances</MudText>
+<MudText Typo="Typo.body1" Class="mb-6">
+    Approved application identities and Mesh infrastructure live here.
+</MudText>
+
+@if (_instances is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudTable Items="_instances" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>Kind</MudTh>
+            <MudTh>Group / site</MudTh>
+            <MudTh>Role</MudTh>
+            <MudTh>Endpoint</MudTh>
+            <MudTh>Status</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Name">
+                <MudLink Href="@($"/instances/{context.Id}")">@context.DisplayName</MudLink>
+            </MudTd>
+            <MudTd DataLabel="Kind">@context.Kind</MudTd>
+            <MudTd DataLabel="Group / site">@(context.GroupName ?? context.SiteName)</MudTd>
+            <MudTd DataLabel="Role">@context.InstanceRole</MudTd>
+            <MudTd DataLabel="Endpoint">@context.AdvertisedEndpoint</MudTd>
+            <MudTd DataLabel="Status">@context.Status</MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    private IReadOnlyList<ManagedInstanceSummary>? _instances;
+
+    protected override async Task OnInitializedAsync()
+        => _instances = await Enrollment.GetManagedInstancesAsync();
+}

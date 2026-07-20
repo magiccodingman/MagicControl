@@ -1,7 +1,21 @@
-﻿<MudNavMenu>
-    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
-    <MudNavLink Href="counter" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Add">Counter</MudNavLink>
+<MudNavMenu>
+    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+        Dashboard
+    </MudNavLink>
 
-    <MudNavLink Href="weather" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.List">Weather</MudNavLink>
+    <AuthorizeView Policy="@MagicControlSecurity.UserAdministrationPolicy">
+        <MudNavLink Href="users" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.People">
+            Users
+        </MudNavLink>
+    </AuthorizeView>
 
+    <AuthorizeView Policy="@MagicControlSecurity.EnrollmentAdministrationPolicy">
+        <MudNavLink Href="enrollments" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AppRegistration">
+            Enrollment requests
+        </MudNavLink>
+    </AuthorizeView>
+
+    <MudNavLink Href="instances" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Hub">
+        Managed instances
+    </MudNavLink>
 </MudNavMenu>

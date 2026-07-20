@@ -1,0 +1,56 @@
+@page "/setup"
+@attribute [AllowAnonymous]
+
+<PageTitle>First-time setup - MagicControl</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-12">
+    <MudPaper Elevation="4" Class="pa-8">
+        <MudText Typo="Typo.h4" GutterBottom="true">Create the first administrator</MudText>
+        <MudAlert Severity="Severity.Info" Class="mb-6">
+            MagicControl has no default username or password. This page closes permanently after setup.
+        </MudAlert>
+
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@Error</MudAlert>
+        }
+
+        <form method="post" action="/account/setup">
+            <AntiforgeryToken />
+
+            <div class="mc-field">
+                <label for="username">Administrator username</label>
+                <input id="username" name="username" autocomplete="username" required />
+            </div>
+
+            <div class="mc-field">
+                <label for="password">Password</label>
+                <input id="password" type="password" name="password"
+                       autocomplete="new-password" minlength="14" required />
+            </div>
+
+            <div class="mc-field">
+                <label for="confirmPassword">Confirm password</label>
+                <input id="confirmPassword" type="password" name="confirmPassword"
+                       autocomplete="new-password" minlength="14" required />
+            </div>
+
+            <div class="mc-field">
+                <label for="setupToken">Remote setup token</label>
+                <input id="setupToken" type="password" name="setupToken" autocomplete="off" />
+                <span class="mc-help">Only required when setup is submitted from a different machine.</span>
+            </div>
+
+            <MudButton ButtonType="ButtonType.Submit"
+                       Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       FullWidth="true">
+                Initialize MagicControl
+            </MudButton>
+        </form>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+}
