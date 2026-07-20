@@ -113,7 +113,8 @@ public sealed class PeerDiscoveryTests
             Path.GetTempPath(),
             "magic-control-peer-cache",
             Guid.NewGuid().ToString("N"));
-        var options = CreateOptions().WithStatePath(statePath);
+        var options = CreateOptions();
+        options.StatePath = statePath;
         var signed = CreateSignedAdvertisement(options.GroupId, "Orders");
         var observation = new MagicControlPeerObservation(
             signed,
@@ -163,14 +164,6 @@ public sealed class PeerDiscoveryTests
             EnableDirectPeerDiscovery = false
         };
         options.Validate();
-        return options;
-    }
-
-    private static MagicControlClientOptions WithStatePath(
-        this MagicControlClientOptions options,
-        string statePath)
-    {
-        options.StatePath = statePath;
         return options;
     }
 
