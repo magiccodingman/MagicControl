@@ -69,12 +69,11 @@ public sealed class MagicControlClientSyncTransport :
             {
                 try
                 {
-                    var response = await SynchronizeThroughAsync(
+                    return await SynchronizeThroughAsync(
                         meshEndpoint,
                         state,
                         request,
                         cancellationToken);
-                    return response;
                 }
                 catch (Exception exception) when (
                     exception is not OperationCanceledException
@@ -190,7 +189,9 @@ public sealed class MagicControlClientSyncTransport :
         var knownEndpoints = response.MeshEndpoints
             .Append(meshEndpoint)
             .Where(_options.IsEndpointAllowed)
-            .DistinctBy(candidate => candidate.AbsoluteUri.TrimEnd('/'), StringComparer.OrdinalIgnoreCase)
+            .DistinctBy(
+                candidate => candidate.AbsoluteUri.TrimEnd('/'),
+                StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         var authority = state.AuthorityPublicKey;
@@ -232,44 +233,54 @@ public sealed class MagicControlClientSyncTransport :
         };
         await _stateStore.SaveAsync(updatedState, cancellationToken);
 
-        if (response.EnrollmentState == MagicControlEnrollmentState.Approved)
+        switch (response.EnrollmentState)
         {
-            _status.RecordSuccess(meshEndpoint, DateTimeOffset.UtcNow);
-            return response.Settings with
-            {
-                State = MagicControlPlaneState.Active,
-                Snapshot = response.Settings.Snapshot
-            };
-        }
+            case MagicControlEnrollmentState.Approved:
+                _status.RecordSuccess(meshEndpoint, DateTimeOffset.UtcNow);
+                return response.Settings with
+                {
+                    State = MagicControlPlaneState.Active,
+                    Snapshot = response.Settings.Snapshot
+                };
 
-        if (response.EnrollmentState == MagicControlEnrollmentState.PendingApproval)
-        {
-            _status.RecordFailure(
-                response.Message ?? "This application is waiting for MagicControl approval.");
-            return response.Settings with
-            {
-                State = MagicControlPlaneState.PendingApproval,
-                Snapshot = MagicRemoteSnapshot.Empty
-            };
-        }
+            case MagicControlEnrollmentState.PendingApproval:
+                _status.RecordEnrollment(
+                    MagicControlEnrollmentState.PendingApproval,
+                    response.Message ?? "This application is waiting for MagicControl approval.",
+                    response.PairingCode,
+                    meshEndpoint);
+                return response.Settings with
+                {
+                    State = MagicControlPlaneState.PendingApproval,
+                    Snapshot = MagicRemoteSnapshot.Empty
+                };
 
-        if (response.EnrollmentState == MagicControlEnrollmentState.LocalOnly)
-        {
-            _status.RecordFailure(
-                response.Message ?? "MagicControl is operating in local-only mode.");
-            return response.Settings with
-            {
-                State = MagicControlPlaneState.Disconnected,
-                Snapshot = MagicRemoteSnapshot.Empty
-            };
-        }
+            case MagicControlEnrollmentState.LocalOnly:
+                _status.RecordEnrollment(
+                    MagicControlEnrollmentState.LocalOnly,
+                    response.Message ?? "MagicControl is operating in local-only mode.",
+                    response.PairingCode,
+                    meshEndpoint);
+                return response.Settings with
+                {
+                    State = MagicControlPlaneState.Disconnected,
+                    Snapshot = MagicRemoteSnapshot.Empty
+                };
 
-        _status.RecordFailure(response.Message ?? "MagicControl synchronization was rejected.");
-        return response.Settings with
-        {
-            State = MagicControlPlaneState.Faulted,
-            Snapshot = MagicRemoteSnapshot.Empty
-        };
+            case MagicControlEnrollmentState.Rejected:
+            case MagicControlEnrollmentState.Faulted:
+            default:
+                _status.RecordEnrollment(
+                    response.EnrollmentState,
+                    response.Message ?? "MagicControl synchronization was rejected.",
+                    response.PairingCode,
+                    meshEndpoint);
+                return response.Settings with
+                {
+                    State = MagicControlPlaneState.Faulted,
+                    Snapshot = MagicRemoteSnapshot.Empty
+                };
+        }
     }
 
     private async ValueTask<MagicSettingsSyncResponse> CreateOfflineResponseAsync(
@@ -291,7 +302,9 @@ public sealed class MagicControlClientSyncTransport :
                     stored.Envelope,
                     stored.LastAuthorityContactUtc,
                     LoadedFromDisk: true));
-                _status.RecordFailure(reason);
+                _status.RecordEnrollment(
+                    MagicControlEnrollmentState.Approved,
+                    $"{reason} Last-known-good approved state is active.");
                 return new MagicSettingsSyncResponse(
                     MagicControlPlaneState.Active,
                     state.OfflineSnapshot,
@@ -299,7 +312,7 @@ public sealed class MagicControlClientSyncTransport :
             }
         }
 
-        _status.RecordFailure(reason);
+        _status.RecordEnrollment(MagicControlEnrollmentState.LocalOnly, reason);
         return new MagicSettingsSyncResponse(
             MagicControlPlaneState.Disconnected,
             MagicRemoteSnapshot.Empty,
@@ -343,7 +356,7 @@ public sealed class MagicControlClientSyncTransport :
     }
 
     private static Uri EnsureTrailingSlash(Uri endpoint)
-        => endpoint.AbsoluteUri.EndsWith('/', StringComparison.Ordinal)
+        => endpoint.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
             ? endpoint
             : new Uri(endpoint.AbsoluteUri + "/", UriKind.Absolute);
 
