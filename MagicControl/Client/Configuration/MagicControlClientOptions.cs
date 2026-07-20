@@ -31,6 +31,7 @@ public sealed class MagicControlClientOptions
     public string StatePath { get; set; } = "state/magic-control";
     public string ManifestFileName { get; set; } = "group-manifest.protected";
     public string ClientStateFileName { get; set; } = "client-state.protected";
+    public string PeerDirectoryFileName { get; set; } = "peer-directory.protected";
 
     public MagicControlStartupMode StartupMode { get; set; } = MagicControlStartupMode.CachedFirst;
     public MagicControlRouteSelectionMode RouteSelection { get; set; } = MagicControlRouteSelectionMode.Automatic;
@@ -41,6 +42,26 @@ public sealed class MagicControlClientOptions
     public bool EnableAutomaticDiscovery { get; set; } = true;
     public string DiscoveryMulticastAddress { get; set; } = MagicControlNodeProtocol.DiscoveryMulticastAddress;
     public int DiscoveryPort { get; set; } = MagicControlNodeProtocol.DiscoveryPort;
+
+    /// <summary>
+    /// Enables application-to-application LAN discovery inside MagicControl.Client. This path
+    /// works without MagicControl Web, a Mesh API, or a cached authority directory.
+    /// </summary>
+    public bool EnableDirectPeerDiscovery { get; set; } = true;
+
+    public string PeerDiscoveryMulticastAddress { get; set; } = MagicControlNodeProtocol.PeerDiscoveryMulticastAddress;
+    public int PeerDiscoveryPort { get; set; } = MagicControlNodeProtocol.PeerDiscoveryPort;
+    public TimeSpan PeerAdvertisementTtl { get; set; } = TimeSpan.FromSeconds(20);
+    public TimeSpan PeerDiscoveryQueryInterval { get; set; } = TimeSpan.FromSeconds(5);
+    public TimeSpan PeerCacheDuration { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Allows identity-verified direct peers to be returned when no usable authority manifest
+    /// exists. This never grants MagicControl membership or capabilities; secured authorization
+    /// attributes still require authority-approved cached state.
+    /// </summary>
+    public bool AllowIdentityVerifiedPeersWithoutAuthority { get; set; } = true;
+
     public bool AllowInsecureHttp { get; set; }
 
     public List<Uri> MeshEndpointSeeds { get; } = [];
@@ -134,6 +155,27 @@ public sealed class MagicControlClientOptions
         if (DiscoveryPort is < 1 or > 65535)
         {
             throw new InvalidOperationException("MagicControl discovery port must be a valid UDP port.");
+        }
+
+        if (PeerDiscoveryPort is < 1 or > 65535)
+        {
+            throw new InvalidOperationException("MagicControl peer discovery port must be a valid UDP port.");
+        }
+
+        if (PeerAdvertisementTtl < TimeSpan.FromSeconds(5)
+            || PeerAdvertisementTtl > TimeSpan.FromMinutes(5))
+        {
+            throw new InvalidOperationException("MagicControl peer advertisement TTL must be between five seconds and five minutes.");
+        }
+
+        if (PeerDiscoveryQueryInterval < TimeSpan.FromSeconds(1))
+        {
+            throw new InvalidOperationException("MagicControl peer discovery query interval must be at least one second.");
+        }
+
+        if (PeerCacheDuration < PeerAdvertisementTtl)
+        {
+            throw new InvalidOperationException("MagicControl peer cache duration must be at least as long as the advertisement TTL.");
         }
 
         foreach (var endpoint in MeshEndpointSeeds)
