@@ -35,7 +35,7 @@ if (magicSettings.ShouldExit)
 
 builder.Services.AddMudServices();
 builder.Services.AddProblemDetails();
-builder.Services.AddControllers();
+builder.Services.AddMagicControlControllers();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
     .AddInteractiveWebAssemblyComponents();
