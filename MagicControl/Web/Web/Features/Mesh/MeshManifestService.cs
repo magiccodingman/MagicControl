@@ -12,7 +12,7 @@ public sealed record UpdateGroupMeshPolicyRequest(
     MagicControlGroupSecurityMode SecurityMode,
     long? MaximumOfflineSeconds);
 
-public sealed class MeshManifestService(
+public sealed partial class MeshManifestService(
     IDbContextFactory<MagicControlDbContext> dbFactory,
     MagicControlAuthoritySigningService authority)
 {
