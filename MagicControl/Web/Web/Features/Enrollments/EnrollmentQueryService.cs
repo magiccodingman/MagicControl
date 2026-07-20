@@ -18,12 +18,15 @@ public sealed partial class EnrollmentService
             query = query.Where(x => x.Status == status);
         }
 
-        var rows = await query
+        // SQLite can persist DateTimeOffset values but cannot translate ordering by them.
+        // Keep filtering in the database and perform the final presentation ordering in memory.
+        var rows = await query.ToListAsync(cancellationToken);
+
+        return rows
             .OrderByDescending(x => x.Status == EnrollmentRequestStatus.Pending)
             .ThenByDescending(x => x.LastSeenUtc)
-            .ToListAsync(cancellationToken);
-
-        return rows.Select(ToSummary).ToArray();
+            .Select(ToSummary)
+            .ToArray();
     }
 
     public async ValueTask<IReadOnlyList<ManagedInstanceSummary>> GetManagedInstancesAsync(
