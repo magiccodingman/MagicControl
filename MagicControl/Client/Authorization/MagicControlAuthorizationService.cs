@@ -6,17 +6,25 @@ namespace MagicControl.Client;
 public sealed record MagicControlAuthorizationDecision(
     bool Allowed,
     string? Reason,
-    MagicControlMember? Member)
+    MagicControlMember? Member,
+    IReadOnlyList<Guid> GroupIds)
 {
-    public static MagicControlAuthorizationDecision Permit(MagicControlMember? member = null)
-        => new(true, null, member);
+    public static MagicControlAuthorizationDecision Permit(
+        MagicControlMember member,
+        IReadOnlyList<Guid> groupIds)
+        => new(true, null, member, groupIds);
 
     public static MagicControlAuthorizationDecision Deny(string reason)
-        => new(false, reason, null);
+        => new(false, reason, null, []);
 }
 
 public interface IMagicControlAuthorizationService
 {
+    MagicControlAuthorizationDecision AuthenticateCredential(
+        Guid nodeId,
+        Guid credentialId,
+        DateTimeOffset? nowUtc = null);
+
     MagicControlAuthorizationDecision AuthorizeMember(
         Guid groupId,
         Guid nodeId,
@@ -33,6 +41,34 @@ public interface IMagicControlAuthorizationService
 public sealed class MagicControlAuthorizationService(MagicControlManifestCache cache)
     : IMagicControlAuthorizationService
 {
+    public MagicControlAuthorizationDecision AuthenticateCredential(
+        Guid nodeId,
+        Guid credentialId,
+        DateTimeOffset? nowUtc = null)
+    {
+        var now = nowUtc ?? DateTimeOffset.UtcNow;
+        var matches = cache.GetAll()
+            .Where(state => state.AllowsOfflineUse(now))
+            .Select(state => new
+            {
+                state.Manifest.GroupId,
+                Member = state.Manifest.Members.FirstOrDefault(candidate =>
+                    candidate.NodeId == nodeId && candidate.CredentialId == credentialId)
+            })
+            .Where(match => match.Member is not null)
+            .ToArray();
+
+        if (matches.Length == 0)
+        {
+            return MagicControlAuthorizationDecision.Deny(
+                "The caller does not have an approved credential in any trusted group manifest.");
+        }
+
+        return MagicControlAuthorizationDecision.Permit(
+            matches[0].Member!,
+            matches.Select(match => match.GroupId).Distinct().ToArray());
+    }
+
     public MagicControlAuthorizationDecision AuthorizeMember(
         Guid groupId,
         Guid nodeId,
@@ -69,7 +105,7 @@ public sealed class MagicControlAuthorizationService(MagicControlManifestCache c
                 $"The caller does not have the '{requiredCapability}' capability.");
         }
 
-        return MagicControlAuthorizationDecision.Permit(member);
+        return MagicControlAuthorizationDecision.Permit(member, [groupId]);
     }
 
     public IReadOnlyList<MagicControlDirectoryEntry> ResolveAll(
