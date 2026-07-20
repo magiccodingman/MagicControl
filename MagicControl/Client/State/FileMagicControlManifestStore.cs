@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Security.Cryptography;
 using MagicControl.Shared.Mesh;
 
 namespace MagicControl.Client;
@@ -13,16 +13,18 @@ public interface IMagicControlManifestStore
     ValueTask SaveAsync(StoredMagicControlManifest manifest, CancellationToken cancellationToken = default);
 }
 
-public sealed class FileMagicControlManifestStore(MagicControlClientOptions options)
-    : IMagicControlManifestStore
+public sealed class FileMagicControlManifestStore : IMagicControlManifestStore, IDisposable
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true
-    };
+    private readonly string _path;
+    private readonly ProtectedManifestFileCodec _codec;
 
-    private readonly string _path = Path.GetFullPath(
-        Path.Combine(options.StatePath, options.ManifestFileName));
+    public FileMagicControlManifestStore(MagicControlClientOptions options)
+    {
+        _path = Path.GetFullPath(Path.Combine(options.StatePath, options.ManifestFileName));
+        _codec = new ProtectedManifestFileCodec(
+            options.StatePath,
+            $"MagicControl.Client:{options.ApplicationName}:{options.GroupId:D}");
+    }
 
     public async ValueTask<StoredMagicControlManifest?> LoadAsync(
         CancellationToken cancellationToken = default)
@@ -34,20 +36,11 @@ public sealed class FileMagicControlManifestStore(MagicControlClientOptions opti
 
         try
         {
-            await using var stream = new FileStream(
-                _path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                16_384,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-            return await JsonSerializer.DeserializeAsync<StoredMagicControlManifest>(
-                stream,
-                JsonOptions,
-                cancellationToken);
+            var contents = await File.ReadAllBytesAsync(_path, cancellationToken);
+            return _codec.Unprotect<StoredMagicControlManifest>(contents);
         }
-        catch (Exception exception) when (exception is IOException or JsonException)
+        catch (Exception exception) when (
+            exception is IOException or CryptographicException or InvalidDataException)
         {
             return null;
         }
@@ -62,7 +55,9 @@ public sealed class FileMagicControlManifestStore(MagicControlClientOptions opti
 
         var directory = Path.GetDirectoryName(_path)!;
         Directory.CreateDirectory(directory);
+        RestrictDirectoryPermissions(directory);
 
+        var protectedContents = _codec.Protect(manifest);
         var temporaryPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -74,7 +69,7 @@ public sealed class FileMagicControlManifestStore(MagicControlClientOptions opti
                              16_384,
                              FileOptions.Asynchronous | FileOptions.WriteThrough))
             {
-                await JsonSerializer.SerializeAsync(stream, manifest, JsonOptions, cancellationToken);
+                await stream.WriteAsync(protectedContents, cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
 
@@ -103,13 +98,23 @@ public sealed class FileMagicControlManifestStore(MagicControlClientOptions opti
 
     private static void RestrictFilePermissions(string path)
     {
-        if (OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindows())
         {
-            return;
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
-
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
+
+    private static void RestrictDirectoryPermissions(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    public void Dispose() => _codec.Dispose();
 }
 
 public sealed record MagicControlManifestValidationResult(bool IsValid, string? Error)
