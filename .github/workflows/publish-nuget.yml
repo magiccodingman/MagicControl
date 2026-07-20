@@ -1,0 +1,114 @@
+name: Publish NuGet package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve package version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag '$GITHUB_REF_NAME' does not produce a valid package version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        working-directory: MagicControl
+        run: dotnet restore MagicControl.sln
+
+      - name: Build
+        working-directory: MagicControl
+        run: dotnet build MagicControl.sln --configuration Release --no-restore
+
+      - name: Test
+        working-directory: MagicControl
+        run: dotnet test MagicControl.sln --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Pack
+        working-directory: MagicControl
+        run: >-
+          dotnet pack MagicControl.sln
+          --configuration Release
+          --no-restore
+          --output ../artifacts/packages
+          -p:PackageVersion=${{ steps.version.outputs.version }}
+
+      - name: Validate package output
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          package_dir="artifacts/packages"
+          package="$package_dir/MagicControl.Client.$version.nupkg"
+          symbols="$package_dir/MagicControl.Client.$version.snupkg"
+
+          test -f "$package"
+          test -f "$symbols"
+
+          package_count=$(find "$package_dir" -maxdepth 1 -name '*.nupkg' | wc -l)
+          if [[ "$package_count" -ne 1 ]]; then
+            echo "Expected exactly one .nupkg file, found $package_count."
+            find "$package_dir" -maxdepth 1 -type f -print
+            exit 1
+          fi
+
+          if ! unzip -l "$package" | grep -q 'lib/net10.0/MagicControl.Shared.dll'; then
+            echo "$package does not contain lib/net10.0/MagicControl.Shared.dll."
+            exit 1
+          fi
+
+          if ! unzip -l "$package" | grep -q '128x128_compressed.png'; then
+            echo "$package does not contain the configured package icon."
+            exit 1
+          fi
+
+          if ! unzip -l "$package" | grep -q 'README.md'; then
+            echo "$package does not contain README.md."
+            exit 1
+          fi
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package-${{ steps.version.outputs.version }}
+          path: artifacts/packages/*.*nupkg
+          if-no-files-found: error
+
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Publish package
+        shell: bash
+        run: >-
+          dotnet nuget push "artifacts/packages/*.nupkg"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

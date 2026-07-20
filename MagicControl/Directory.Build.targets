@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup Condition="'$(IsPackable)' == 'true' and '$(MSBuildProjectName)' == 'MagicControl.Client'">
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeMagicControlSharedInPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+
+  <Target Name="IncludeMagicControlSharedInPackage"
+          Condition="'$(IsPackable)' == 'true' and '$(MSBuildProjectName)' == 'MagicControl.Client'"
+          DependsOnTargets="BuildOnlySettings;ResolveReferences">
+    <ItemGroup>
+      <_MagicControlSharedAssembly Include="@(ReferenceCopyLocalPaths)"
+                                   Condition="'%(ReferenceCopyLocalPaths.Filename)' == 'MagicControl.Shared' and '%(ReferenceCopyLocalPaths.Extension)' == '.dll'" />
+      <BuildOutputInPackage Include="@(_MagicControlSharedAssembly)" />
+    </ItemGroup>
+
+    <Error Condition="'@(_MagicControlSharedAssembly)' == ''"
+           Text="MagicControl.Shared.dll was not found in the resolved project references and cannot be included in the MagicControl.Client NuGet package." />
+  </Target>
+</Project>
