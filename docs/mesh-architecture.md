@@ -7,25 +7,29 @@ MagicControl Web is the durable authority. Mesh APIs are nearby discovery, relay
 Applications communicate directly and use `MagicControl.Client` to:
 
 - initialize MagicSettings and preserve local-only operation;
+- discover ordinary applications directly;
 - discover Mesh APIs;
 - establish secured enrollment after administrator approval;
 - cache signed authorization state and offline-safe settings;
 - authenticate peers locally;
 - advertise service endpoints;
-- resolve and select trusted application instances.
+- resolve and select application instances with explicit trust metadata.
 
 The authority order is:
 
 1. MagicControl Web owns group membership, approved credentials, capabilities, settings publication, security epochs, and revocation state.
 2. Approved Mesh APIs retrieve signed manifests from Web and relay proof-bound node synchronization.
 3. Clients verify signed manifests and perform request-time authorization entirely in process.
-4. During outages, clients and Mesh continue using last-known-good approved state according to the authority-signed offline policy.
+4. Direct peer discovery proves possession of an advertised MagicSettings identity but does not create authority approval.
+5. During outages, clients and Mesh continue using last-known-good approved state according to the authority-signed offline policy.
 
 ## SDK-only local operation
 
 MagicControl connectivity is additive. `AddMagicControlClientAsync<TSettings>` always initializes the ordinary MagicSettings local document, migrations, environment variables, providers, and node identity.
 
 If no Mesh endpoint is discovered and no approved cache exists, synchronization returns `Disconnected`, the remote layer remains empty, and the application continues using local MagicSettings. This is normal SDK-only mode rather than a startup fault.
+
+Applications with advertised endpoints also continue participating in direct peer discovery. Two clients that share a configured `GroupId` can discover one another without Web, Mesh, or a signed cached directory.
 
 Applications may choose stricter startup behavior:
 
@@ -43,7 +47,41 @@ The normal LAN path does not require a configured Mesh URL. Mesh advertises a re
 
 Explicit endpoints are for routed networks, multicast restrictions, public domains, or tests. They supplement discovery rather than disabling it.
 
-Discovery is not trust. An untrusted responder is only a candidate transport. Secured state is accepted only after proof-bound approval and authority-signature validation.
+Mesh discovery is not trust. An untrusted responder is only a candidate transport. Secured state is accepted only after proof-bound approval and authority-signature validation.
+
+## Direct application discovery
+
+Direct application discovery is a separate client-to-client multicast protocol and does not depend on a Mesh process listening on the LAN.
+
+A peer advertisement contains:
+
+- protocol version, group, and application identity;
+- instance, role, site, and version metadata;
+- the MagicSettings node identity and public credential;
+- service endpoints, priorities, and route classification;
+- a monotonic sequence, issue time, and short TTL;
+- a MagicSettings proof signed over the exact serialized advertisement body and logical discovery URI.
+
+Receivers verify:
+
+- the configured group;
+- permitted endpoint schemes;
+- node and credential binding;
+- public-key fingerprint;
+- proof version, audience, method, target, body hash, lifetime, and nonce;
+- ECDSA P-256 signature.
+
+Valid observations enter a separate encrypted peer cache with a short configurable lifetime. They never enter or modify the signed authority-manifest cache.
+
+The resolver assigns explicit trust:
+
+- `IdentityVerified` — the advertisement is cryptographically bound to the advertised persistent identity, but no authority approval is available;
+- `AuthorityDirectory` — the route came from an authority-signed open-group directory;
+- `AuthorityApproved` — the route is backed by an approved or retiring credential in a usable secured manifest.
+
+When no usable manifest exists, identity-verified peers are returned by default so ordinary standalone applications can find one another. This behavior can be disabled with `AllowIdentityVerifiedPeersWithoutAuthority = false`.
+
+When a secured manifest exists, a direct advertisement is returned only if its node ID, credential ID, public key, application name, and credential status match an approved manifest member. Discovery never bypasses revocation or secured membership.
 
 ## Secured bootstrap and authority pinning
 
@@ -105,7 +143,9 @@ Offline trust is infinite by default. A null `MaximumOfflineSeconds` means that 
 
 Administrators may configure a finite duration per group. The lease is anchored to the authority-signed manifest issue time. Repeatedly contacting an offline Mesh cannot extend the lease.
 
-Client and Mesh cache files are encrypted with ASP.NET Core Data Protection and restricted to the current Unix account. Authority signatures and membership are revalidated after decryption.
+Client and Mesh authority cache files are encrypted with ASP.NET Core Data Protection and restricted to the current Unix account. Authority signatures and membership are revalidated after decryption.
+
+The direct peer cache has a separate short duration even when authority offline trust is infinite. Identity observations are not authority grants and do not inherit the authority manifest's lease.
 
 ## Open and secured groups
 
@@ -135,18 +175,20 @@ No Web or Mesh request occurs during controller authorization. Applications may 
 - `IMagicControlAuthorizationService` for manual authorization;
 - `IMagicControlServiceResolver` for route selection.
 
+Identity-verified discovery results do not satisfy membership or capability authorization. Applications that choose to call unmanaged peers must make that decision explicitly from resolver trust metadata.
+
 ## Endpoint announcements and routing
 
-Approved applications include signed endpoint announcements in normal synchronization. Web records endpoint priority, transport, loopback/LAN classification, sequence, and last-seen time. The signed directory gives records a finite expiration so crashed or disconnected instances age out.
+Applications include endpoints in both direct peer advertisements and connected node synchronization. Web records connected endpoint priority, transport, loopback/LAN classification, sequence, and last-seen time. The signed directory gives records a finite expiration so crashed or disconnected instances age out.
 
-The high-level resolver prefers:
+The high-level resolver combines direct observations and signed directory records, then prefers:
 
 1. loopback;
 2. LAN;
 3. private routed addresses;
 4. public addresses.
 
-It then applies configured priority and stable instance ordering. Round-robin is optional. Applications can report route failures to quarantine an endpoint temporarily. `ResolveAll` remains available for custom policies and always preserves duplicate application instances.
+It applies configured priority, trust strength, source freshness, and stable instance ordering. Round-robin is optional. Applications can report route failures to quarantine an endpoint temporarily. `ResolveAll` remains available for custom policies and always preserves duplicate application instances.
 
 ## Mesh outage cache
 
@@ -162,14 +204,15 @@ When Web is unavailable, Mesh may return that cached approved state only if:
 - the exact node and credential are members;
 - the group offline trust lease still permits use.
 
-Pending enrollment, a new node, uncached settings, and live-only secrets require Web.
+Pending enrollment, a new node, uncached settings, and live-only secrets require Web. Direct identity-verified application discovery remains available independently of the Mesh outage.
 
 ## Final security boundaries
 
-- Mesh discovery identifies routes, never trust.
+- Mesh discovery identifies control-plane routes, never trust.
+- Direct peer discovery proves identity possession, never authority approval.
 - Administrator approval establishes the first secured authority relationship.
 - Web alone signs authoritative group state and publishes settings revisions.
 - Applications own their local schema and migrations.
 - Remote snapshots are complete replacement layers; omitted paths reveal lower MagicSettings providers.
 - Secrets are explicit, asynchronous, live-only values.
-- Direct application traffic remains peer-to-peer and is locally authorized from signed cached state.
+- Direct application traffic remains peer-to-peer; secured authorization remains locally enforced from signed cached state.

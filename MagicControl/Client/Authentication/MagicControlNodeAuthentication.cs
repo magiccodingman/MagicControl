@@ -125,12 +125,18 @@ public sealed class MagicControlNodeAuthenticationHandler(
     }
 }
 
+public static class MagicControlAuthorizationPolicies
+{
+    public const string Member = "MagicControl.Member";
+}
+
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
 public sealed class RequireMagicControlMemberAttribute : AuthorizeAttribute
 {
     public RequireMagicControlMemberAttribute()
     {
         AuthenticationSchemes = MagicControlMeshProtocol.NodeAuthenticationScheme;
+        Policy = MagicControlAuthorizationPolicies.Member;
     }
 }
 
@@ -145,22 +151,61 @@ public sealed class RequireMagicControlCapabilityAttribute : AuthorizeAttribute
     }
 }
 
-public sealed record MagicControlCapabilityRequirement(string Capability) : IAuthorizationRequirement;
+/// <summary>
+/// Represents an endpoint that is open until a signed secured-group policy is accepted. Once
+/// secured, it remains secured through outages, restarts, missing caches, and expired leases until
+/// a validated authority manifest explicitly declares the group Open.
+/// </summary>
+public sealed record MagicControlAccessRequirement(string? Capability) : IAuthorizationRequirement;
 
-public sealed class MagicControlCapabilityHandler
-    : AuthorizationHandler<MagicControlCapabilityRequirement>
+public sealed class MagicControlAccessHandler(
+    MagicControlManifestCache cache,
+    MagicControlRuntimeSecurityState securityState)
+    : AuthorizationHandler<MagicControlAccessRequirement>
 {
     protected override Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
-        MagicControlCapabilityRequirement requirement)
+        MagicControlAccessRequirement requirement)
     {
-        if (context.User.HasClaim(
+        var states = cache.GetAll();
+        var securedStates = states
+            .Where(state => state.Manifest.SecurityMode == MagicControlGroupSecurityMode.Secured)
+            .ToArray();
+
+        // Before any authority has secured the application, MagicControl is additive. A signed
+        // Open manifest also leaves these endpoints open. The persistent latch prevents absence
+        // or corruption of the manifest cache from being interpreted as permission to reopen.
+        if (!securityState.RequiresAuthorization && securedStates.Length == 0)
+        {
+            context.Succeed(requirement);
+            return Task.CompletedTask;
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return Task.CompletedTask;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var belongsToUsableSecuredGroup = securedStates.Any(state =>
+            state.AllowsOfflineUse(now)
+            && context.User.HasClaim(
+                MagicControlMeshProtocol.GroupIdClaim,
+                state.Manifest.GroupId.ToString("D")));
+        if (!belongsToUsableSecuredGroup)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requirement.Capability)
+            && !context.User.HasClaim(
                 MagicControlMeshProtocol.CapabilityClaim,
                 requirement.Capability))
         {
-            context.Succeed(requirement);
+            return Task.CompletedTask;
         }
 
+        context.Succeed(requirement);
         return Task.CompletedTask;
     }
 }
@@ -173,6 +218,14 @@ public sealed class MagicControlCapabilityPolicyProvider(
 
     public Task<AuthorizationPolicy?> GetPolicyAsync(string policyName)
     {
+        if (string.Equals(
+                policyName,
+                MagicControlAuthorizationPolicies.Member,
+                StringComparison.Ordinal))
+        {
+            return Task.FromResult<AuthorizationPolicy?>(BuildPolicy(capability: null));
+        }
+
         if (!policyName.StartsWith(
                 MagicControlMeshProtocol.CapabilityPolicyPrefix,
                 StringComparison.Ordinal))
@@ -181,13 +234,7 @@ public sealed class MagicControlCapabilityPolicyProvider(
         }
 
         var capability = policyName[MagicControlMeshProtocol.CapabilityPolicyPrefix.Length..];
-        var policy = new AuthorizationPolicyBuilder(
-                MagicControlMeshProtocol.NodeAuthenticationScheme)
-            .RequireAuthenticatedUser()
-            .AddRequirements(new MagicControlCapabilityRequirement(capability))
-            .Build();
-
-        return Task.FromResult<AuthorizationPolicy?>(policy);
+        return Task.FromResult<AuthorizationPolicy?>(BuildPolicy(capability));
     }
 
     public Task<AuthorizationPolicy> GetDefaultPolicyAsync()
@@ -195,4 +242,10 @@ public sealed class MagicControlCapabilityPolicyProvider(
 
     public Task<AuthorizationPolicy?> GetFallbackPolicyAsync()
         => _fallback.GetFallbackPolicyAsync();
+
+    private static AuthorizationPolicy BuildPolicy(string? capability)
+        => new AuthorizationPolicyBuilder(
+                MagicControlMeshProtocol.NodeAuthenticationScheme)
+            .AddRequirements(new MagicControlAccessRequirement(capability))
+            .Build();
 }

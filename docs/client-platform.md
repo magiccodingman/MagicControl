@@ -49,12 +49,14 @@ if (magic.ShouldExit)
 
 - MagicSettings generates and maintains the local settings document normally.
 - Local environment variables and custom providers continue working.
-- The client performs opportunistic Mesh discovery without making platform availability a startup requirement.
+- Applications advertise and discover one another directly on the LAN when endpoints are configured.
+- The client also performs opportunistic Mesh discovery without making platform availability a startup requirement.
+- Before the client has accepted a signed Secured policy, protected MagicControl endpoints behave as open application endpoints.
 - When no approved cached state and no Mesh are available, the application reports local-only status and continues normally.
 
 Use `RequireApprovedState` only for applications that must refuse startup without previously approved MagicControl state.
 
-## Automatic discovery and endpoint overrides
+## Automatic Mesh discovery and endpoint overrides
 
 On ordinary IPv4 LANs, Mesh APIs advertise themselves through the built-in multicast discovery protocol. Clients combine:
 
@@ -70,7 +72,44 @@ client.AddMeshEndpointOverride("https://control.example.com");
 
 It supplements discovery rather than disabling it.
 
-## Secured enrollment
+## Direct application discovery without Mesh
+
+`MagicControl.Client` also runs a separate application-to-application discovery channel. This channel does not require Web, Mesh, or an existing signed directory.
+
+Each application periodically advertises:
+
+- its configured `GroupId` and `ApplicationName`;
+- its MagicSettings node and credential identity;
+- instance, role, site, and version metadata;
+- configured service endpoints and priorities;
+- a sequence, issue time, and short TTL;
+- a MagicSettings proof over the exact advertisement body and logical peer-discovery target.
+
+A receiver verifies the public-key fingerprint, body hash, proof audience, method, target, lifetime, identity binding, and ECDSA signature before accepting the peer. Accepted observations are kept in memory and in a separate encrypted short-lived cache.
+
+When no usable authority manifest exists **and the application has never accepted a signed Secured policy**, `IMagicControlServiceResolver` may return these routes with:
+
+```csharp
+result.TrustLevel == MagicControlPeerTrustLevel.IdentityVerified
+result.Source == MagicControlServiceDiscoverySource.DirectPeerLan
+```
+
+Identity-verified means the advertisement was signed by the advertised persistent MagicSettings identity. It does **not** mean MagicControl Web approved that identity, and it grants no membership, role, or capability.
+
+When a valid secured manifest exists, direct advertisements are returned only if the manifest contains the exact node ID, credential ID, public key, application name, and approved or retiring credential. Those routes are marked `AuthorityApproved`. Unapproved direct peers are filtered out.
+
+After the application has accepted any signed Secured policy, a persistent `secured-policy.lock` marker prevents fallback to identity-only routes when the manifest is missing, corrupt, expired, or temporarily unavailable. The marker contains no secret; file presence is deliberately the security signal so truncated contents remain fail-closed.
+
+Direct discovery can be disabled or tightened:
+
+```csharp
+client.EnableDirectPeerDiscovery = false;
+client.AllowIdentityVerifiedPeersWithoutAuthority = false;
+```
+
+The peer multicast address, port, advertisement TTL, query interval, and encrypted cache duration are configurable for environments with unusual networking requirements.
+
+## Secured enrollment and live transition
 
 For a secured group, first startup works without a manually pasted authority key:
 
@@ -79,8 +118,21 @@ For a secured group, first startup works without a manually pasted authority key
 3. MagicControl Web displays the node fingerprint, pairing code, configured group, application schema, and requested capabilities.
 4. An enrollment administrator approves that exact credential and nonce.
 5. The running application automatically receives the initial signed group manifest, installs the Web authority pin, receives its node-specific settings snapshot, and begins normal refresh.
+6. Before publishing the manifest to request-time consumers, the client closes the in-memory access gate and persists the secured-policy latch.
+7. The next request and service-resolution call use secured behavior; no process restart is required.
 
 Discovery identifies candidates; it does not establish trust. Administrator approval of the proof-bound request establishes the first authority relationship.
+
+Once secured, absence is never interpreted as permission to reopen. The application remains secured through:
+
+- Web or Mesh outages;
+- restarts;
+- missing or unreadable ordinary client state;
+- missing, corrupt, or expired manifests;
+- an empty direct-peer cache;
+- discovery of new unmanaged applications.
+
+Only a successfully validated authority manifest explicitly declaring the group `Open` clears the persistent latch. Opening is ordered fail-safe: the client first durably saves the validated signed Open manifest, then removes the persistent marker, and only then relaxes the in-memory request gate. A crash can therefore leave the application more restrictive, never accidentally open. A different authority is not silently trusted; moving to another control plane requires an explicit trust-reset and re-enrollment decision rather than connectivity loss being treated as a rebind.
 
 MagicSettings credential rotation preserves the logical node and approval through its continuity proof. A destructive identity reset creates a new node and requires approval again.
 
@@ -138,40 +190,54 @@ public IActionResult Status() => Ok();
 public IActionResult CreateOrder() => Ok();
 ```
 
-`IMagicControlAuthorizationService` remains available for manual checks and complete directory lookup.
+These attributes are dynamic policies:
+
+- before any signed Secured policy is accepted, they allow normal open application access;
+- after secured approval, they immediately require an approved credential and group membership;
+- capability attributes additionally require the published capability;
+- a known secured policy remains fail-closed when its finite offline lease expires;
+- a missing manifest cannot downgrade a persisted secured application.
+
+`IMagicControlAuthorizationService` remains available for manual checks and complete directory lookup. Direct peer discovery never causes these authority-backed checks to downgrade to identity-only authorization.
 
 ## Service discovery and routing
 
-Applications announce their reachable endpoints during node synchronization. The signed directory includes endpoint priority, loopback/LAN classification, sequence, observation time, and expiration.
+Applications announce their reachable endpoints through direct peer discovery and, when connected, during node synchronization. The signed directory includes endpoint priority, loopback/LAN classification, sequence, observation time, and expiration.
 
-`IMagicControlServiceResolver` provides normal route selection:
+`IMagicControlServiceResolver` combines signed directory entries with direct peer observations:
 
 ```csharp
 var target = resolver.Resolve("Inventory");
 if (target is null)
 {
-    // No trusted live instance is currently known.
+    // No usable instance is currently known.
+}
+else if (!target.IsAuthorityApproved)
+{
+    // Standalone identity-verified peer; choose whether this operation permits it.
 }
 ```
 
-Route preference is loopback, LAN, private routed address, then public address. Applications may report failures so an endpoint is temporarily quarantined and another trusted instance can be selected. Round-robin selection is optional. `ResolveAll` remains available when the caller needs complete policy control.
+Route preference is loopback, LAN, private routed address, then public address. Applications may report failures so an endpoint is temporarily quarantined and another instance can be selected. Round-robin selection is optional. `ResolveAll` remains available when the caller needs complete policy control.
 
 ## Outage behavior
 
 - Web owns approval, settings publication, revocation, and signatures.
 - Mesh caches signed manifests and approved offline-safe node snapshots.
-- Clients keep encrypted last-known-good authorization and permitted settings.
-- Existing approved applications continue communicating directly when Web is unavailable.
+- Clients keep encrypted last-known-good authorization, permitted settings, a separate short-lived direct peer cache, and a non-secret sticky secured-policy marker.
+- Existing approved applications continue communicating directly when Web is unavailable while their authority-signed offline policy permits it.
 - Existing approved applications can recover cached state through Mesh when Web is unavailable.
+- Applications that have never been secured can still discover identity-verified peers directly.
+- Applications that have been secured never fall back to identity-only routing or open request access during an outage.
 - New enrollment and live-only secret retrieval require Web.
-- A finite group offline lease expires from the authority-signed manifest issue time; reaching a stale Mesh cannot extend it.
+- A finite group offline lease expires from the authority-signed manifest issue time; reaching a stale Mesh cannot extend it, and expiry remains fail-closed.
 - Infinite offline trust remains the default for availability-first installations.
 
 ## Deployable components
 
 - **MagicControl Web** — administrative control pane and durable authority.
 - **MagicControl Mesh** — LAN discovery, Web relay, signed-state distribution, and outage cache.
-- **MagicControl.Client** — application SDK for MagicSettings integration, enrollment, cached authorization, discovery, routing, and endpoint announcements.
+- **MagicControl.Client** — application SDK for MagicSettings integration, enrollment, cached authorization, direct peer discovery, routing, and endpoint announcements.
 
 Web supports SQLite by default and optional PostgreSQL. It includes first-run administrator setup, protected primary-administrator semantics, users and roles, enrollment review, groups, managed instances, application settings, audit records, and health checks.
 

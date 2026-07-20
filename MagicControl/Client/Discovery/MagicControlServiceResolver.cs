@@ -1,10 +1,37 @@
+using System.Security.Cryptography;
+using System.Text;
 using MagicControl.Shared.Mesh;
+using MagicSettings.Share;
 
 namespace MagicControl.Client;
 
+public enum MagicControlPeerTrustLevel
+{
+    IdentityVerified = 1,
+    AuthorityDirectory = 2,
+    AuthorityApproved = 3
+}
+
+public enum MagicControlServiceDiscoverySource
+{
+    DirectPeerCache = 1,
+    DirectPeerLan = 2,
+    SignedDirectory = 3
+}
+
 public sealed record MagicControlResolvedService(
     MagicControlDirectoryEntry Instance,
-    MagicControlServiceEndpoint Endpoint);
+    MagicControlServiceEndpoint Endpoint)
+{
+    public MagicControlPeerTrustLevel TrustLevel { get; init; } =
+        MagicControlPeerTrustLevel.AuthorityDirectory;
+
+    public MagicControlServiceDiscoverySource Source { get; init; } =
+        MagicControlServiceDiscoverySource.SignedDirectory;
+
+    public bool IsAuthorityApproved =>
+        TrustLevel == MagicControlPeerTrustLevel.AuthorityApproved;
+}
 
 public interface IMagicControlServiceResolver
 {
@@ -20,13 +47,46 @@ public interface IMagicControlServiceResolver
     void ReportFailure(Uri endpoint, TimeSpan? retryAfter = null);
 }
 
-public sealed class MagicControlServiceResolver(
-    MagicControlClientOptions options,
-    MagicControlManifestCache cache) : IMagicControlServiceResolver
+public sealed class MagicControlServiceResolver : IMagicControlServiceResolver
 {
+    private readonly MagicControlClientOptions _options;
+    private readonly MagicControlManifestCache _cache;
+    private readonly MagicControlPeerDirectory _peers;
+    private readonly MagicControlRuntimeSecurityState _securityState;
     private readonly object _gate = new();
     private readonly Dictionary<string, int> _roundRobin = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _unhealthyUntil = new(StringComparer.OrdinalIgnoreCase);
+
+    public MagicControlServiceResolver(
+        MagicControlClientOptions options,
+        MagicControlManifestCache cache)
+        : this(
+            options,
+            cache,
+            new MagicControlPeerDirectory(options),
+            new MagicControlRuntimeSecurityState())
+    {
+    }
+
+    public MagicControlServiceResolver(
+        MagicControlClientOptions options,
+        MagicControlManifestCache cache,
+        MagicControlPeerDirectory peers)
+        : this(options, cache, peers, new MagicControlRuntimeSecurityState())
+    {
+    }
+
+    public MagicControlServiceResolver(
+        MagicControlClientOptions options,
+        MagicControlManifestCache cache,
+        MagicControlPeerDirectory peers,
+        MagicControlRuntimeSecurityState securityState)
+    {
+        _options = options;
+        _cache = cache;
+        _peers = peers;
+        _securityState = securityState;
+    }
 
     public IReadOnlyList<MagicControlResolvedService> ResolveAll(
         string applicationName,
@@ -34,40 +94,44 @@ public sealed class MagicControlServiceResolver(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
         var now = nowUtc ?? DateTimeOffset.UtcNow;
-        var state = cache.Get(options.GroupId);
-        if (state is null || !state.AllowsOfflineUse(now))
+        var state = _cache.Get(_options.GroupId);
+        var knownManifest = state?.Manifest;
+        var usableManifest = state is not null && state.AllowsOfflineUse(now)
+            ? state.Manifest
+            : null;
+        var securedPolicyKnown = _securityState.RequiresAuthorization
+                                 || knownManifest?.SecurityMode == MagicControlGroupSecurityMode.Secured;
+
+        var all = new List<MagicControlResolvedService>();
+        if (usableManifest is not null
+            && (usableManifest.SecurityMode == MagicControlGroupSecurityMode.Secured
+                || !_securityState.RequiresAuthorization))
         {
-            return [];
+            all.AddRange(FromSignedDirectory(usableManifest, applicationName, now));
+            all.AddRange(FromDirectPeers(usableManifest, applicationName, now));
+        }
+        else if (!securedPolicyKnown
+                 && _options.AllowIdentityVerifiedPeersWithoutAuthority)
+        {
+            all.AddRange(FromDirectPeers(null, applicationName, now));
         }
 
-        var resolved = state.Manifest.Directory
-            .Where(instance => string.Equals(
-                instance.ApplicationName,
-                applicationName,
-                StringComparison.OrdinalIgnoreCase))
-            .Where(instance => instance.ExpiresUtc is null || instance.ExpiresUtc >= now)
-            .SelectMany(instance => instance.Endpoints.Select(endpoint =>
-                new MagicControlResolvedService(instance, endpoint)))
-            .Where(candidate => IsHealthy(candidate.Endpoint.Uri, now))
-            .OrderBy(candidate => RouteScore(candidate.Endpoint))
-            .ThenBy(candidate => candidate.Endpoint.Priority)
-            .ThenBy(candidate => candidate.Instance.ManagedInstanceId)
-            .ThenBy(candidate => candidate.Endpoint.Uri.AbsoluteUri, StringComparer.OrdinalIgnoreCase)
+        var deduplicated = all
+            .GroupBy(
+                candidate => $"{candidate.Instance.ManagedInstanceId:D}|{candidate.Endpoint.Uri.AbsoluteUri.TrimEnd('/')}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(candidate => candidate.TrustLevel)
+                .ThenBy(candidate => SourceScore(candidate.Source))
+                .First())
             .ToArray();
 
-        return resolved.Length > 0
-            ? resolved
-            : state.Manifest.Directory
-                .Where(instance => string.Equals(
-                    instance.ApplicationName,
-                    applicationName,
-                    StringComparison.OrdinalIgnoreCase))
-                .Where(instance => instance.ExpiresUtc is null || instance.ExpiresUtc >= now)
-                .SelectMany(instance => instance.Endpoints.Select(endpoint =>
-                    new MagicControlResolvedService(instance, endpoint)))
-                .OrderBy(candidate => RouteScore(candidate.Endpoint))
-                .ThenBy(candidate => candidate.Endpoint.Priority)
-                .ToArray();
+        var healthy = Order(
+                deduplicated.Where(candidate => IsHealthy(candidate.Endpoint.Uri, now)))
+            .ToArray();
+        return healthy.Length > 0
+            ? healthy
+            : Order(deduplicated).ToArray();
     }
 
     public MagicControlResolvedService? Resolve(
@@ -80,7 +144,7 @@ public sealed class MagicControlServiceResolver(
             return null;
         }
 
-        if (options.RouteSelection != MagicControlRouteSelectionMode.RoundRobin)
+        if (_options.RouteSelection != MagicControlRouteSelectionMode.RoundRobin)
         {
             return candidates[0];
         }
@@ -113,6 +177,108 @@ public sealed class MagicControlServiceResolver(
         }
     }
 
+    private IEnumerable<MagicControlResolvedService> FromSignedDirectory(
+        MagicControlGroupManifest manifest,
+        string applicationName,
+        DateTimeOffset nowUtc)
+        => manifest.Directory
+            .Where(instance => string.Equals(
+                instance.ApplicationName,
+                applicationName,
+                StringComparison.OrdinalIgnoreCase))
+            .Where(instance => instance.ExpiresUtc is null || instance.ExpiresUtc >= nowUtc)
+            .SelectMany(instance => instance.Endpoints.Select(endpoint =>
+                new MagicControlResolvedService(instance, endpoint)
+                {
+                    TrustLevel = manifest.SecurityMode == MagicControlGroupSecurityMode.Secured
+                        ? MagicControlPeerTrustLevel.AuthorityApproved
+                        : MagicControlPeerTrustLevel.AuthorityDirectory,
+                    Source = MagicControlServiceDiscoverySource.SignedDirectory
+                }));
+
+    private IEnumerable<MagicControlResolvedService> FromDirectPeers(
+        MagicControlGroupManifest? manifest,
+        string applicationName,
+        DateTimeOffset nowUtc)
+    {
+        foreach (var observation in _peers.GetActive(nowUtc))
+        {
+            var advertisement = observation.Advertisement;
+            if (!string.Equals(
+                    advertisement.ApplicationName,
+                    applicationName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            MagicControlMember? member = null;
+            if (manifest is not null)
+            {
+                member = manifest.Members.FirstOrDefault(candidate =>
+                    candidate.NodeId == advertisement.Identity.NodeId
+                    && candidate.CredentialId == advertisement.Identity.CredentialId
+                    && candidate.CredentialStatus is MagicCredentialStatus.Approved or MagicCredentialStatus.Retiring
+                    && string.Equals(
+                        candidate.ApplicationName,
+                        advertisement.ApplicationName,
+                        StringComparison.OrdinalIgnoreCase)
+                    && PublicKeysMatch(
+                        candidate.PublicKey,
+                        advertisement.Identity.PublicKey));
+
+                if (manifest.SecurityMode == MagicControlGroupSecurityMode.Secured
+                    && member is null)
+                {
+                    continue;
+                }
+            }
+
+            var trust = member is not null
+                ? MagicControlPeerTrustLevel.AuthorityApproved
+                : MagicControlPeerTrustLevel.IdentityVerified;
+            var instance = new MagicControlDirectoryEntry(
+                member?.ManagedInstanceId ?? DerivePeerId(advertisement),
+                advertisement.ApplicationName,
+                advertisement.InstanceName,
+                advertisement.InstanceRole,
+                advertisement.SiteName,
+                advertisement.Endpoints
+                    .Select(endpoint => new MagicControlServiceEndpoint(
+                        endpoint.Uri,
+                        endpoint.Priority,
+                        endpoint.IsLoopback || endpoint.Uri.IsLoopback,
+                        endpoint.IsLan,
+                        endpoint.Transport))
+                    .ToArray(),
+                advertisement.Sequence,
+                observation.LastSeenUtc,
+                observation.LastSeenUtc.Add(_options.PeerCacheDuration));
+            var source = observation.LoadedFromDisk || !observation.IsLive(nowUtc)
+                ? MagicControlServiceDiscoverySource.DirectPeerCache
+                : MagicControlServiceDiscoverySource.DirectPeerLan;
+
+            foreach (var endpoint in instance.Endpoints)
+            {
+                yield return new MagicControlResolvedService(instance, endpoint)
+                {
+                    TrustLevel = trust,
+                    Source = source
+                };
+            }
+        }
+    }
+
+    private IOrderedEnumerable<MagicControlResolvedService> Order(
+        IEnumerable<MagicControlResolvedService> candidates)
+        => candidates
+            .OrderBy(candidate => RouteScore(candidate.Endpoint))
+            .ThenBy(candidate => candidate.Endpoint.Priority)
+            .ThenByDescending(candidate => candidate.TrustLevel)
+            .ThenBy(candidate => SourceScore(candidate.Source))
+            .ThenBy(candidate => candidate.Instance.ManagedInstanceId)
+            .ThenBy(candidate => candidate.Endpoint.Uri.AbsoluteUri, StringComparer.OrdinalIgnoreCase);
+
     private bool IsHealthy(Uri endpoint, DateTimeOffset now)
     {
         lock (_gate)
@@ -139,6 +305,15 @@ public sealed class MagicControlServiceResolver(
         return 30;
     }
 
+    private static int SourceScore(MagicControlServiceDiscoverySource source)
+        => source switch
+        {
+            MagicControlServiceDiscoverySource.DirectPeerLan => 0,
+            MagicControlServiceDiscoverySource.SignedDirectory => 10,
+            MagicControlServiceDiscoverySource.DirectPeerCache => 20,
+            _ => 30
+        };
+
     private static bool IsPrivateAddress(string host)
     {
         if (!System.Net.IPAddress.TryParse(host, out var address)
@@ -151,5 +326,31 @@ public sealed class MagicControlServiceResolver(
         return bytes[0] == 10
                || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
                || (bytes[0] == 192 && bytes[1] == 168);
+    }
+
+    private static Guid DerivePeerId(MagicControlPeerAdvertisement advertisement)
+    {
+        var canonical = string.Join(
+            ':',
+            advertisement.GroupId.ToString("D"),
+            advertisement.ApplicationName,
+            advertisement.Identity.NodeId.ToString("D"),
+            advertisement.Identity.CredentialId.ToString("D"));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    private static bool PublicKeysMatch(string expected, string actual)
+    {
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromBase64String(expected),
+                Convert.FromBase64String(actual));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 }
