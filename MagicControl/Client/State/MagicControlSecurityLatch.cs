@@ -114,10 +114,21 @@ public sealed class FileMagicControlSecurityLatchStore : IMagicControlSecurityLa
     }
 }
 
-public sealed class MagicControlRuntimeSecurityState(
-    IMagicControlSecurityLatchStore latchStore)
+public sealed class MagicControlRuntimeSecurityState
 {
-    private int _requiresAuthorization = latchStore.IsLatched ? 1 : 0;
+    private readonly IMagicControlSecurityLatchStore _latchStore;
+    private int _requiresAuthorization;
+
+    public MagicControlRuntimeSecurityState(IMagicControlSecurityLatchStore latchStore)
+    {
+        _latchStore = latchStore ?? throw new ArgumentNullException(nameof(latchStore));
+        _requiresAuthorization = latchStore.IsLatched ? 1 : 0;
+    }
+
+    internal MagicControlRuntimeSecurityState(bool requiresAuthorization = false)
+        : this(new InMemorySecurityLatchStore(requiresAuthorization))
+    {
+    }
 
     public bool RequiresAuthorization => Volatile.Read(ref _requiresAuthorization) == 1;
 
@@ -135,14 +146,36 @@ public sealed class MagicControlRuntimeSecurityState(
         {
             // Close the in-memory gate before touching disk so the next request is secured.
             Volatile.Write(ref _requiresAuthorization, 1);
-            await latchStore.LatchAsync(manifest, cancellationToken);
+            await _latchStore.LatchAsync(manifest, cancellationToken);
             return;
         }
 
         // Opening is intentionally the reverse order: remove the persistent latch first, then
         // expose Open mode in memory. Callers must only invoke this for a validated authority
         // manifest, never because discovery or connectivity disappeared.
-        await latchStore.ClearAsync(cancellationToken);
+        await _latchStore.ClearAsync(cancellationToken);
         Volatile.Write(ref _requiresAuthorization, 0);
+    }
+
+    private sealed class InMemorySecurityLatchStore(bool isLatched)
+        : IMagicControlSecurityLatchStore
+    {
+        private bool _latched = isLatched;
+
+        public bool IsLatched => _latched;
+
+        public ValueTask LatchAsync(
+            SignedMagicControlGroupManifest manifest,
+            CancellationToken cancellationToken = default)
+        {
+            _latched = true;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask ClearAsync(CancellationToken cancellationToken = default)
+        {
+            _latched = false;
+            return ValueTask.CompletedTask;
+        }
     }
 }
