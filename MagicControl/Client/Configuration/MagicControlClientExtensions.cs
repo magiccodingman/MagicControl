@@ -1,6 +1,7 @@
 using MagicControl.Shared.Mesh;
 using MagicSettings;
 using MagicSettings.Server;
+using MagicSettings.Share;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,14 +22,69 @@ public static class MagicControlClientExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        var clientOptions = new MagicControlClientOptions
+        {
+            Version = typeof(TSettings).Assembly.GetName().Version?.ToString()
+        };
+        configureClient?.Invoke(clientOptions);
+        clientOptions.Validate();
+
+        var cache = new MagicControlManifestCache();
+        var manifestStore = new FileMagicControlManifestStore(clientOptions);
+        var clientStateStore = new FileMagicControlClientStateStore(clientOptions);
+        var persistentState = await clientStateStore.LoadAsync(cancellationToken);
+        clientOptions.TrustedAuthorityPublicKey ??= persistentState.AuthorityPublicKey;
+
+        var validator = new MagicControlManifestValidator(clientOptions);
+        var status = new MagicControlClientStatus();
+        var endpointResolver = new DiscoveringMagicControlMeshEndpointResolver(
+            clientOptions,
+            clientStateStore);
+        var transport = new MagicControlClientSyncTransport(
+            clientOptions,
+            endpointResolver,
+            clientStateStore,
+            manifestStore,
+            validator,
+            cache,
+            status);
+        var logicalEndpointResolver = new MagicControlLogicalEndpointResolver(clientOptions);
+
         var initialization = await builder.AddMagicSettingsAsync(
             args,
-            configureSettings,
+            settings =>
+            {
+                configureSettings?.Invoke(settings);
+                settings.ApplicationId = clientOptions.ApplicationName;
+                settings.ApplicationVersion = clientOptions.Version
+                                              ?? settings.ApplicationVersion;
+                settings.ControlPlaneTransport = transport;
+                settings.ControlPlaneEndpointResolver = logicalEndpointResolver;
+                settings.ControlPlane.Bootstrap.CodeFallbackEndpoint =
+                    MagicControlLogicalUris.ControlPlaneBase(clientOptions.GroupId);
+                settings.ControlPlane.Bootstrap.Trust =
+                    MagicControlPlaneTrust.SystemTls(MagicControlNodeProtocol.NodeSyncAudience);
+                settings.ControlPlane.Bootstrap.ConnectOnStartup = true;
+                settings.ControlPlane.Bootstrap.WatchPersistentEndpoint = false;
+                settings.ControlPlane.PollInterval = clientOptions.RefreshInterval;
+                settings.ControlPlane.PollJitter = TimeSpan.FromSeconds(
+                    Math.Min(5, Math.Max(0, clientOptions.RefreshInterval.TotalSeconds / 10)));
+                settings.ControlPlane.KeepLastKnownGoodDuringOutage = true;
+            },
             cancellationToken);
 
         if (!initialization.ShouldExit)
         {
-            builder.Services.AddMagicControlClient(configureClient);
+            RegisterClientServices(
+                builder.Services,
+                clientOptions,
+                cache,
+                manifestStore,
+                clientStateStore,
+                validator,
+                endpointResolver,
+                status,
+                transport);
         }
 
         return initialization;
@@ -43,16 +99,24 @@ public static class MagicControlClientExtensions
         configure?.Invoke(options);
         options.Validate();
 
-        services.AddMagicControlNodeAuthorization();
-        services.AddSingleton(options);
-        services.AddSingleton<IMagicControlManifestStore, FileMagicControlManifestStore>();
-        services.AddSingleton<MagicControlManifestValidator>();
-        services.AddSingleton<IMagicControlMeshEndpointResolver, ConfiguredMagicControlMeshEndpointResolver>();
-        services.AddSingleton<MagicControlClientStatus>();
+        var cache = new MagicControlManifestCache();
+        var manifestStore = new FileMagicControlManifestStore(options);
+        var stateStore = new FileMagicControlClientStateStore(options);
+        var validator = new MagicControlManifestValidator(options);
+        var status = new MagicControlClientStatus();
+        var resolver = new DiscoveringMagicControlMeshEndpointResolver(options, stateStore);
 
+        services.AddSingleton(options);
+        services.AddSingleton(cache);
+        services.AddSingleton<IMagicControlManifestSource>(cache);
+        services.AddSingleton<IMagicControlManifestStore>(manifestStore);
+        services.AddSingleton<IMagicControlClientStateStore>(stateStore);
+        services.AddSingleton(validator);
+        services.AddSingleton<IMagicControlMeshEndpointResolver>(resolver);
+        services.AddSingleton(status);
+        services.AddMagicControlNodeAuthorization();
         services.AddHttpClient(MagicControlHttpClients.Mesh)
             .AddMagicNodeAuthentication(MagicControlMeshProtocol.MeshPeerAudience);
-
         services.AddHostedService<MagicControlClientHostedService>();
         return services;
     }
@@ -83,5 +147,32 @@ public static class MagicControlClientExtensions
             MagicControlCapabilityPolicyProvider>());
 
         return services;
+    }
+
+    private static void RegisterClientServices(
+        IServiceCollection services,
+        MagicControlClientOptions options,
+        MagicControlManifestCache cache,
+        FileMagicControlManifestStore manifestStore,
+        FileMagicControlClientStateStore stateStore,
+        MagicControlManifestValidator validator,
+        DiscoveringMagicControlMeshEndpointResolver endpointResolver,
+        MagicControlClientStatus status,
+        MagicControlClientSyncTransport transport)
+    {
+        services.AddSingleton(options);
+        services.AddSingleton(cache);
+        services.AddSingleton<IMagicControlManifestSource>(cache);
+        services.AddSingleton<IMagicControlManifestStore>(manifestStore);
+        services.AddSingleton<IMagicControlClientStateStore>(stateStore);
+        services.AddSingleton(validator);
+        services.AddSingleton<IMagicControlMeshEndpointResolver>(endpointResolver);
+        services.AddSingleton(status);
+        services.AddSingleton(transport);
+
+        services.AddMagicControlNodeAuthorization();
+        services.AddHttpClient(MagicControlHttpClients.Mesh)
+            .AddMagicNodeAuthentication(MagicControlMeshProtocol.MeshPeerAudience);
+        services.AddHostedService<MagicControlClientHostedService>();
     }
 }
