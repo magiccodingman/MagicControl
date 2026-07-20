@@ -62,6 +62,19 @@ public sealed class MagicControlNodeSyncService(
                              && candidate.CredentialId == request.Settings.Identity.CredentialId,
                 cancellationToken);
 
+        if (credential is null && request.Settings.IdentityContinuityProof is not null)
+        {
+            var continuity = await MagicControlCredentialContinuity.TryApplyAsync(
+                db,
+                request.Settings,
+                cancellationToken);
+            if (continuity.Error is not null)
+            {
+                return Faulted(request, continuity.Error);
+            }
+            credential = continuity.Credential;
+        }
+
         if (credential is null)
         {
             var verification = await proofVerifier.VerifyEnrollmentAsync(
