@@ -178,6 +178,7 @@ public sealed class MagicControlClientHostedService(
             return false;
         }
 
+        // The manifest is already durable at this point. Applying Open may safely clear the latch.
         await securityState.ApplyValidatedManifestAsync(stored.Envelope, cancellationToken);
         cache.Set(new MagicControlManifestState(
             stored.Envelope,
@@ -248,8 +249,17 @@ public sealed class MagicControlClientHostedService(
                         validation.Error ?? "The Mesh API returned an invalid group manifest.");
                 }
 
-                await securityState.ApplyValidatedManifestAsync(envelope, cancellationToken);
-                await store.SaveAsync(stored, cancellationToken);
+                if (envelope.Manifest.SecurityMode == MagicControlGroupSecurityMode.Secured)
+                {
+                    await securityState.ApplyValidatedManifestAsync(envelope, cancellationToken);
+                    await store.SaveAsync(stored, cancellationToken);
+                }
+                else
+                {
+                    await store.SaveAsync(stored, cancellationToken);
+                    await securityState.ApplyValidatedManifestAsync(envelope, cancellationToken);
+                }
+
                 cache.Set(new MagicControlManifestState(envelope, now, LoadedFromDisk: false));
                 status.RecordSuccess(endpoint, now);
                 return true;
