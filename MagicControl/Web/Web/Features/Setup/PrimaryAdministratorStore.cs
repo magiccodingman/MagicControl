@@ -79,9 +79,13 @@ public static class PrimaryAdministratorStore
                 .Select(x => x.Value)
                 .SingleAsync(cancellationToken);
 
-            return Guid.TryParse(winningValue, out var winningId)
-                ? winningId
-                : throw;
+            if (Guid.TryParse(winningValue, out var winningId))
+            {
+                return winningId;
+            }
+
+            throw new InvalidOperationException(
+                "The stored primary administrator identifier is invalid.");
         }
     }
 
