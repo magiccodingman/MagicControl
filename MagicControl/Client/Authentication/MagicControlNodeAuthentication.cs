@@ -18,8 +18,7 @@ public sealed class MagicControlNodeAuthenticationHandler(
     ILoggerFactory logger,
     UrlEncoder encoder,
     MagicNodeProofVerifier proofVerifier,
-    IMagicControlAuthorizationService authorization,
-    MagicControlClientOptions clientOptions)
+    IMagicControlAuthorizationService authorization)
     : AuthenticationHandler<AuthenticationSchemeOptions>(schemes, logger, encoder)
 {
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -73,8 +72,7 @@ public sealed class MagicControlNodeAuthenticationHandler(
             return AuthenticateResult.Fail(verification.Error ?? "The MagicNode proof is invalid.");
         }
 
-        var decision = authorization.AuthorizeMember(
-            clientOptions.GroupId,
+        var decision = authorization.AuthenticateCredential(
             proof.NodeId,
             proof.CredentialId);
         if (!decision.Allowed || decision.Member is null)
@@ -88,10 +86,11 @@ public sealed class MagicControlNodeAuthenticationHandler(
             new(ClaimTypes.NameIdentifier, member.ManagedInstanceId.ToString("D")),
             new(ClaimTypes.Name, member.DisplayName),
             new(MagicControlMeshProtocol.NodeIdClaim, member.NodeId.ToString("D")),
-            new(MagicControlMeshProtocol.CredentialIdClaim, member.CredentialId.ToString("D")),
-            new(MagicControlMeshProtocol.GroupIdClaim, clientOptions.GroupId.ToString("D"))
+            new(MagicControlMeshProtocol.CredentialIdClaim, member.CredentialId.ToString("D"))
         };
 
+        claims.AddRange(decision.GroupIds.Select(groupId =>
+            new Claim(MagicControlMeshProtocol.GroupIdClaim, groupId.ToString("D"))));
         claims.AddRange(member.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
         claims.AddRange(member.Capabilities.Select(capability =>
             new Claim(MagicControlMeshProtocol.CapabilityClaim, capability)));
