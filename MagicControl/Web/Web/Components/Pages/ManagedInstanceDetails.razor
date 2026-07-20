@@ -1,0 +1,63 @@
+@page "/instances/{Id:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject EnrollmentService Enrollment
+
+<PageTitle>Managed instance - MagicControl</PageTitle>
+
+@if (_detail is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudText Typo="Typo.h3" GutterBottom="true">@_detail.Instance.DisplayName</MudText>
+
+    <MudGrid Class="mb-6">
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-5">
+                <MudText Typo="Typo.h5" GutterBottom="true">Identity</MudText>
+                <MudText>Kind: @_detail.Instance.Kind</MudText>
+                <MudText>Application: @_detail.Instance.ApplicationName</MudText>
+                <MudText>Group: @_detail.Instance.GroupName</MudText>
+                <MudText>Role: @_detail.Instance.InstanceRole</MudText>
+                <MudText>Site: @_detail.Instance.SiteName</MudText>
+                <MudText>Endpoint: @_detail.Instance.AdvertisedEndpoint</MudText>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-5">
+                <MudText Typo="Typo.h5" GutterBottom="true">Managed settings</MudText>
+                <MudAlert Severity="Severity.Info">
+                    This is the attachment point for the next settings-distribution slice.
+                    Normal configuration snapshots and on-demand secrets will remain separate.
+                </MudAlert>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudText Typo="Typo.h5" GutterBottom="true">Approved credentials</MudText>
+    <MudTable Items="_detail.Credentials" Hover="true">
+        <HeaderContent>
+            <MudTh>Node</MudTh>
+            <MudTh>Credential</MudTh>
+            <MudTh>Fingerprint</MudTh>
+            <MudTh>Status</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.NodeId</MudTd>
+            <MudTd>@context.CredentialId</MudTd>
+            <MudTd><code>@context.Fingerprint</code></MudTd>
+            <MudTd>@context.Status</MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private ManagedInstanceDetail? _detail;
+
+    protected override async Task OnParametersSetAsync()
+        => _detail = await Enrollment.GetManagedInstanceAsync(Id);
+}

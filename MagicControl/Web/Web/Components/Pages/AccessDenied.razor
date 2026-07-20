@@ -1,0 +1,10 @@
+@page "/access-denied"
+@attribute [AllowAnonymous]
+
+<PageTitle>Access denied - MagicControl</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-12">
+    <MudAlert Severity="Severity.Error">
+        Your account is authenticated, but it does not have permission to access this page.
+    </MudAlert>
+</MudContainer>

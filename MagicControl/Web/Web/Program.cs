@@ -1,42 +1,100 @@
+using MagicControl.Web.Components;
+using MagicControl.Web.Configuration;
+using MagicControl.Web.Data;
+using MagicControl.Web.Features.Dashboard;
+using MagicControl.Web.Health;
+using MagicControl.Web.Security;
+using MagicSettings;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
-using Web.Client.Pages;
-using Web.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add MudBlazor services
-builder.Services.AddMudServices();
+var magicSettings = await builder.AddMagicSettingsAsync<MagicControlSettings>(
+    args,
+    options =>
+    {
+        options.ApplicationId = "MagicControl.Web";
+        options.ApplicationVersion =
+            typeof(Program).Assembly.GetName().Version?.ToString() ?? "development";
+        options.SchemaVersion = 1;
+        options.Template = MagicControlSettings.CreateDefaults(builder.Environment.IsDevelopment());
+        options.Path = "state";
+        options.FileName = "appsettings.json";
+        options.IdentityPath = "state";
+        options.PreserveUnknownProperties = true;
+        options.ControlPlane.Bootstrap.ConnectOnStartup = false;
+    });
 
-// Add services to the container.
+if (magicSettings.ShouldExit)
+{
+    Environment.ExitCode = magicSettings.ExitCode;
+    return;
+}
+
+builder.Services.AddMudServices();
+builder.Services.AddProblemDetails();
+builder.Services.AddMagicControlControllers();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
     .AddInteractiveWebAssemblyComponents();
+builder.Services.AddCascadingAuthenticationState();
+
+builder.Services.AddMagicControlDatabase(builder.Configuration);
+builder.Services.AddMagicControlDataProtection(builder.Configuration);
+builder.Services.AddMagicControlSecurity(builder.Configuration);
+builder.Services.AddScoped<DashboardService>();
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+if (builder.Configuration.GetValue("Database:ApplyMigrationsOnStartup", true))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var factory = scope.ServiceProvider
+        .GetRequiredService<IDbContextFactory<MagicControlDbContext>>();
+    await using var db = await factory.CreateDbContextAsync();
+    await db.Database.MigrateAsync();
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseWebAssemblyDebugging();
 }
 else
 {
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
+    app.UseExceptionHandler();
     app.UseHsts();
 }
 
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-
 app.UseHttpsRedirection();
+app.UseStaticFiles();
+app.UseRouting();
 
-
+app.UseMiddleware<SetupRequiredMiddleware>();
+app.UseAuthentication();
+app.UseMiddleware<MustChangePasswordMiddleware>();
+app.UseAuthorization();
 app.UseAntiforgery();
 
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = _ => false
+}).AllowAnonymous();
+
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = registration => registration.Tags.Contains("ready")
+}).AllowAnonymous();
+
+app.MapControllers();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
-    .AddInteractiveWebAssemblyRenderMode()
-    .AddAdditionalAssemblies(typeof(Web.Client._Imports).Assembly);
+    .AddInteractiveWebAssemblyRenderMode();
 
 app.Run();
+
+public partial class Program { }

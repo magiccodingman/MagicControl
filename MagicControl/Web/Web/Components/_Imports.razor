@@ -1,14 +1,19 @@
-﻿@using System.Net.Http
+@using System.Net.Http
 @using System.Net.Http.Json
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.AspNetCore.Components.Web
 @using static Microsoft.AspNetCore.Components.Web.RenderMode
-@using Microsoft.AspNetCore.Components.Web.Virtualization
 @using Microsoft.JSInterop
 @using MudBlazor
-@using MudBlazor.Services
-@using Web
-@using Web.Client
-@using Web.Components
-@using Web.Components.Layout
+@using MagicControl.Shared.Enrollments
+@using MagicControl.Shared.Security
+@using MagicControl.Web
+@using MagicControl.Web.Components
+@using MagicControl.Web.Components.Layout
+@using MagicControl.Web.Features.Dashboard
+@using MagicControl.Web.Features.Enrollments
+@using MagicControl.Web.Features.Users

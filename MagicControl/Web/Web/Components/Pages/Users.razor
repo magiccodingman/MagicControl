@@ -1,0 +1,182 @@
+@page "/users"
+@rendermode InteractiveServer
+@attribute [RequireMagicControlRole(MagicControlRoles.UserAdministrator)]
+@inject UserAdministrationService UserAdministration
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Users - MagicControl</PageTitle>
+
+<MudText Typo="Typo.h3" GutterBottom="true">Users</MudText>
+<MudText Typo="Typo.body1" Class="mb-2">
+    Temporary passwords are shown once and are never stored in readable form.
+</MudText>
+<MudText Typo="Typo.body2" Class="mb-6">
+    The primary administrator is permanently protected from being disabled or losing the Super Administrator role.
+</MudText>
+
+@if (!string.IsNullOrWhiteSpace(_message))
+{
+    <MudAlert Severity="@_messageSeverity" Class="mb-4">@_message</MudAlert>
+}
+
+@if (!string.IsNullOrWhiteSpace(_temporaryPassword))
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-6">
+        Temporary password for <strong>@_temporaryUsername</strong>:
+        <code>@_temporaryPassword</code>
+        <br />
+        Copy it now. MagicControl cannot display it again.
+    </MudAlert>
+}
+
+<MudPaper Class="pa-5 mb-8">
+    <MudText Typo="Typo.h5" GutterBottom="true">Create user</MudText>
+    <MudGrid>
+        <MudItem xs="12" md="5">
+            <MudTextField @bind-Value="_newUsername" Label="Username" Variant="Variant.Outlined" />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="string" @bind-Value="_newRole" Label="Initial role" Variant="Variant.Outlined">
+                @foreach (var role in MagicControlRoles.BuiltIn)
+                {
+                    <MudSelectItem T="string" Value="@role">@role</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="3" Class="d-flex align-center">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync">
+                Create user
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_users is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudTable Items="_users" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>Username</MudTh>
+            <MudTh>Roles</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh>Last login</MudTh>
+            <MudTh>Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Username">
+                @context.Username
+                @if (context.IsPrimaryAdministrator)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="ml-2">
+                        Primary
+                    </MudChip>
+                }
+            </MudTd>
+            <MudTd DataLabel="Roles">@string.Join(", ", context.Roles)</MudTd>
+            <MudTd DataLabel="Status">
+                @(context.IsDisabled ? "Disabled" :
+                  context.MustChangePassword ? "Password change required" : "Active")
+            </MudTd>
+            <MudTd DataLabel="Last login">@context.LastLoginUtc?.ToLocalTime().ToString("g")</MudTd>
+            <MudTd DataLabel="Actions">
+                <MudButton Size="Size.Small" OnClick="@(() => ResetPasswordAsync(context.Id))">
+                    Reset password
+                </MudButton>
+                <MudButton Size="Size.Small"
+                           Disabled="@(context.IsPrimaryAdministrator && !context.IsDisabled)"
+                           Color="@(context.IsPrimaryAdministrator && !context.IsDisabled
+                               ? Color.Default
+                               : context.IsDisabled ? Color.Success : Color.Warning)"
+                           OnClick="@(() => ToggleDisabledAsync(context))">
+                    @(context.IsPrimaryAdministrator && !context.IsDisabled
+                        ? "Protected"
+                        : context.IsDisabled ? "Enable" : "Disable")
+                </MudButton>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    private IReadOnlyList<UserSummary>? _users;
+    private string _newUsername = string.Empty;
+    private string _newRole = MagicControlRoles.Viewer;
+    private string? _temporaryPassword;
+    private string? _temporaryUsername;
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+    private Guid _actorId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _actorId = Guid.Parse(state.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await ReloadAsync();
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            var result = await UserAdministration.CreateAsync(
+                new CreateUserRequest(_newUsername, [_newRole]),
+                _actorId);
+            ShowTemporary(result);
+            _newUsername = string.Empty;
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            ShowError(exception.Message);
+        }
+    }
+
+    private async Task ResetPasswordAsync(Guid id)
+    {
+        try
+        {
+            var result = await UserAdministration.ResetPasswordAsync(id, _actorId);
+            ShowTemporary(result);
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            ShowError(exception.Message);
+        }
+    }
+
+    private async Task ToggleDisabledAsync(UserSummary user)
+    {
+        try
+        {
+            await UserAdministration.SetDisabledAsync(user.Id, !user.IsDisabled, _actorId);
+            _message = user.IsDisabled ? "User enabled." : "User disabled.";
+            _messageSeverity = Severity.Success;
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            ShowError(exception.Message);
+        }
+    }
+
+    private async Task ReloadAsync()
+        => _users = await UserAdministration.GetUsersAsync();
+
+    private void ShowTemporary(TemporaryPasswordResult result)
+    {
+        _temporaryUsername = result.Username;
+        _temporaryPassword = result.TemporaryPassword;
+        _message = "The password hash was stored; the readable password exists only in this response.";
+        _messageSeverity = Severity.Success;
+    }
+
+    private void ShowError(string message)
+    {
+        _message = message;
+        _messageSeverity = Severity.Error;
+    }
+}

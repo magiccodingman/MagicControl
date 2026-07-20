@@ -1,0 +1,92 @@
+@page "/enrollments"
+@rendermode InteractiveServer
+@using MagicControl.Web.Components.Enrollments
+@attribute [RequireMagicControlRole(MagicControlRoles.EnrollmentAdministrator)]
+@inject EnrollmentService Enrollment
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Enrollment requests - MagicControl</PageTitle>
+
+<MudText Typo="Typo.h3" GutterBottom="true">Enrollment requests</MudText>
+<MudText Typo="Typo.body1" Class="mb-6">
+    Discovery is not authorization. Every valid cryptographic request waits here for an explicit decision.
+</MudText>
+
+@if (!string.IsNullOrWhiteSpace(_message))
+{
+    <MudAlert Severity="@_severity" Class="mb-4">@_message</MudAlert>
+}
+
+@if (_requests is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudTabs Elevation="2" Rounded="true">
+        <MudTabPanel Text="@($"Mesh APIs ({MeshRequests.Count})")" Icon="@Icons.Material.Filled.Hub">
+            <EnrollmentRequestTable Requests="MeshRequests" Mesh="true"
+                                    OnApprove="ApproveAsync" OnReject="RejectAsync" />
+        </MudTabPanel>
+        <MudTabPanel Text="@($"Applications ({ApplicationRequests.Count})")" Icon="@Icons.Material.Filled.Apps">
+            <EnrollmentRequestTable Requests="ApplicationRequests"
+                                    OnApprove="ApproveAsync" OnReject="RejectAsync" />
+        </MudTabPanel>
+        <MudTabPanel Text="@($"Reviewed ({ReviewedRequests.Count})")" Icon="@Icons.Material.Filled.FactCheck">
+            <EnrollmentRequestTable Requests="ReviewedRequests"
+                                    OnApprove="ApproveAsync" OnReject="RejectAsync" />
+        </MudTabPanel>
+    </MudTabs>
+}
+
+@code {
+    private IReadOnlyList<EnrollmentRequestSummary>? _requests;
+    private Guid _reviewerId;
+    private string? _message;
+    private Severity _severity = Severity.Info;
+
+    private IReadOnlyList<EnrollmentRequestSummary> MeshRequests
+        => _requests?.Where(x => x.Kind == EnrollmentKind.MeshApi
+                                 && x.Status == EnrollmentRequestStatus.Pending).ToArray() ?? [];
+
+    private IReadOnlyList<EnrollmentRequestSummary> ApplicationRequests
+        => _requests?.Where(x => x.Kind == EnrollmentKind.ApplicationInstance
+                                 && x.Status == EnrollmentRequestStatus.Pending).ToArray() ?? [];
+
+    private IReadOnlyList<EnrollmentRequestSummary> ReviewedRequests
+        => _requests?.Where(x => x.Status != EnrollmentRequestStatus.Pending).ToArray() ?? [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _reviewerId = Guid.Parse(state.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await ReloadAsync();
+    }
+
+    private Task ApproveAsync(Guid id) => ReviewAsync(id, true);
+
+    private Task RejectAsync(Guid id) => ReviewAsync(id, false);
+
+    private async Task ReviewAsync(Guid id, bool approve)
+    {
+        try
+        {
+            var result = await Enrollment.ReviewAsync(
+                id,
+                approve,
+                approve ? null : "Rejected by an administrator.",
+                _reviewerId);
+            _message = result.Message;
+            _severity = approve ? Severity.Success : Severity.Warning;
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            _message = exception.Message;
+            _severity = Severity.Error;
+        }
+    }
+
+    private async Task ReloadAsync()
+        => _requests = await Enrollment.GetRequestsAsync();
+}

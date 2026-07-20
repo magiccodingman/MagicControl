@@ -1,0 +1,73 @@
+:root {
+    color-scheme: dark;
+    font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body {
+    min-height: 100%;
+    margin: 0;
+    background: #1a1a27;
+}
+
+body {
+    min-height: 100vh;
+}
+
+.mc-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin-bottom: 1.25rem;
+}
+
+.mc-field label {
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.mc-field input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.92);
+    font: inherit;
+    line-height: 1.5;
+    padding: 0.75rem 0.85rem;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.mc-field input:hover {
+    border-color: rgba(255, 255, 255, 0.55);
+}
+
+.mc-field input:focus {
+    border-color: #7e6fff;
+    box-shadow: 0 0 0 1px #7e6fff;
+    outline: none;
+}
+
+.mc-help {
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 10000;
+    padding: 0.8rem 1.25rem;
+    background: #b71c1c;
+    color: white;
+}
+
+#blazor-error-ui .reload,
+#blazor-error-ui .dismiss {
+    margin-left: 1rem;
+    color: white;
+}
