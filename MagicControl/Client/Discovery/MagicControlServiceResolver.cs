@@ -52,6 +52,7 @@ public sealed class MagicControlServiceResolver : IMagicControlServiceResolver
     private readonly MagicControlClientOptions _options;
     private readonly MagicControlManifestCache _cache;
     private readonly MagicControlPeerDirectory _peers;
+    private readonly MagicControlRuntimeSecurityState _securityState;
     private readonly object _gate = new();
     private readonly Dictionary<string, int> _roundRobin = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _unhealthyUntil = new(StringComparer.OrdinalIgnoreCase);
@@ -59,7 +60,11 @@ public sealed class MagicControlServiceResolver : IMagicControlServiceResolver
     public MagicControlServiceResolver(
         MagicControlClientOptions options,
         MagicControlManifestCache cache)
-        : this(options, cache, new MagicControlPeerDirectory(options))
+        : this(
+            options,
+            cache,
+            new MagicControlPeerDirectory(options),
+            new MagicControlRuntimeSecurityState())
     {
     }
 
@@ -67,10 +72,20 @@ public sealed class MagicControlServiceResolver : IMagicControlServiceResolver
         MagicControlClientOptions options,
         MagicControlManifestCache cache,
         MagicControlPeerDirectory peers)
+        : this(options, cache, peers, new MagicControlRuntimeSecurityState())
+    {
+    }
+
+    public MagicControlServiceResolver(
+        MagicControlClientOptions options,
+        MagicControlManifestCache cache,
+        MagicControlPeerDirectory peers,
+        MagicControlRuntimeSecurityState securityState)
     {
         _options = options;
         _cache = cache;
         _peers = peers;
+        _securityState = securityState;
     }
 
     public IReadOnlyList<MagicControlResolvedService> ResolveAll(
@@ -84,14 +99,18 @@ public sealed class MagicControlServiceResolver : IMagicControlServiceResolver
         var usableManifest = state is not null && state.AllowsOfflineUse(now)
             ? state.Manifest
             : null;
+        var securedPolicyKnown = _securityState.RequiresAuthorization
+                                 || knownManifest?.SecurityMode == MagicControlGroupSecurityMode.Secured;
 
         var all = new List<MagicControlResolvedService>();
-        if (usableManifest is not null)
+        if (usableManifest is not null
+            && (usableManifest.SecurityMode == MagicControlGroupSecurityMode.Secured
+                || !_securityState.RequiresAuthorization))
         {
             all.AddRange(FromSignedDirectory(usableManifest, applicationName, now));
             all.AddRange(FromDirectPeers(usableManifest, applicationName, now));
         }
-        else if (knownManifest?.SecurityMode != MagicControlGroupSecurityMode.Secured
+        else if (!securedPolicyKnown
                  && _options.AllowIdentityVerifiedPeersWithoutAuthority)
         {
             all.AddRange(FromDirectPeers(null, applicationName, now));
