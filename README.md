@@ -8,7 +8,8 @@ The first foundation includes:
 
 - SQLite by default with optional PostgreSQL.
 - MagicSettings-backed local configuration with generated environment-appropriate logging defaults.
-- First-run administrator setup with no default password.
+- First-run creation of a fixed `admin` primary account with no default password.
+- Permanent protection against disabling or demoting the primary administrator.
 - Cookie authentication, forced password changes, and local-only administrator recovery.
 - User and role administration.
 - Cryptographically signed enrollment requests using MagicSettings node identities.
