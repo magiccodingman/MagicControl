@@ -1,4 +1,5 @@
 using MagicControl.Shared.Enrollments;
+using MagicControl.Shared.Mesh;
 using MagicControl.Web.Data.Entities;
 using MagicSettings.Share;
 using Microsoft.EntityFrameworkCore;
@@ -69,8 +70,12 @@ internal static class MagicControlModelSnapshotBuilder
             b.Property<bool>("AllowOpenLocalMembers");
             b.Property<DateTimeOffset>("CreatedUtc");
             b.Property<string>("Description").HasMaxLength(2000);
+            b.Property<long>("ManifestRevision");
             b.Property<string>("Name").IsRequired().HasMaxLength(160);
             b.Property<string>("NormalizedName").IsRequired().HasMaxLength(160);
+            b.Property<long?>("OfflineTrustDurationSeconds");
+            b.Property<Guid>("SecurityEpoch");
+            b.Property<MagicControlGroupSecurityMode>("SecurityMode").HasConversion<string>().HasMaxLength(32);
             b.Property<DateTimeOffset>("UpdatedUtc");
             b.HasKey("Id");
             b.HasIndex("NormalizedName").IsUnique();
