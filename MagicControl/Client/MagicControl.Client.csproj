@@ -10,15 +10,17 @@
     <Title>MagicControl Client</Title>
     <Description>MagicControl discovery, cached authorization, offline manifests, peer authentication, and MagicSettings integration for managed applications.</Description>
     <PackageTags>control-plane;service-discovery;authentication;authorization;configuration;mesh</PackageTags>
+    <PackageIcon>128x128_compressed.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Shared\MagicControl.Shared.csproj" />
+    <ProjectReference Include="..\Shared\MagicControl.Shared.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="MagicSettings" Version="0.1.0" />
     <PackageReference Include="MagicSettings.Server" Version="0.1.0" />
+    <None Include="../128x128_compressed.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
